@@ -16,6 +16,7 @@ from agents.models.openai_responses import OpenAIResponsesModel
 from agents import SQLiteSession
 
 from agent_core.agent import MAX_TURNS
+from agent_core.agent import MCP_SESSION_TIMEOUT_SECONDS
 from agent_core.agent import OpenAIAgent
 from agent_core.agent import _get_model
 from agent_core.agent import _parse_skill_description
@@ -32,32 +33,70 @@ def _stub_instructions(monkeypatch):
 @pytest.fixture(autouse=True)
 def _mock_model(monkeypatch):
     """Prevent tests from constructing a real OpenAI client and isolate shell env vars."""
-    monkeypatch.setattr("agent_core.agent._get_model", lambda: create_autospec(Model))
+    monkeypatch.setattr("agent_core.agent._get_model", lambda model_name, api_type: create_autospec(Model))
     monkeypatch.delenv("SHELL_ENABLED", raising=False)
     monkeypatch.delenv("SHELL_SKILLS_DIR", raising=False)
 
 
 class TestGetModel:
-    def test_returns_responses_model_by_default(self, monkeypatch):
-        monkeypatch.delenv("OPENAI_API_TYPE", raising=False)
-
+    def test_returns_responses_model_by_default(self):
         with patch("agent_core.agent.AsyncOpenAI", return_value=MagicMock()):
-            model = _get_model()
+            model = _get_model("gpt-4o", "responses")
         assert isinstance(model, OpenAIResponsesModel)
 
-    def test_returns_responses_model_when_api_type_is_responses(self, monkeypatch):
-        monkeypatch.setenv("OPENAI_API_TYPE", "responses")
-
+    def test_returns_responses_model_when_api_type_is_responses(self):
         with patch("agent_core.agent.AsyncOpenAI", return_value=MagicMock()):
-            model = _get_model()
+            model = _get_model("gpt-4o", "responses")
         assert isinstance(model, OpenAIResponsesModel)
 
-    def test_returns_chat_completions_model_when_api_type_is_chat_completions(self, monkeypatch):
-        monkeypatch.setenv("OPENAI_API_TYPE", "chat_completions")
-
+    def test_returns_chat_completions_model_when_api_type_is_chat_completions(self):
         with patch("agent_core.agent.AsyncOpenAI", return_value=MagicMock()):
-            model = _get_model()
+            model = _get_model("gpt-4o", "chat_completions")
         assert isinstance(model, OpenAIChatCompletionsModel)
+
+
+@pytest.mark.usefixtures("_stub_instructions")
+class TestFromDictModel:
+    def test_default_model_when_not_in_config(self):
+        captured = {}
+
+        def fake_get_model(model_name, api_type):
+            captured["model_name"] = model_name
+            captured["api_type"] = api_type
+            return create_autospec(Model)
+
+        with patch("agent_core.agent._get_model", side_effect=fake_get_model):
+            OpenAIAgent.from_dict("test", {"mcpServers": {}})
+
+        from agent_core.agent import OPENAI_MODEL_DEFAULT, OPENAI_API_TYPE_DEFAULT
+        assert captured["model_name"] == OPENAI_MODEL_DEFAULT
+        assert captured["api_type"] == OPENAI_API_TYPE_DEFAULT
+
+    def test_custom_model_from_config(self):
+        captured = {}
+
+        def fake_get_model(model_name, api_type):
+            captured["model_name"] = model_name
+            captured["api_type"] = api_type
+            return create_autospec(Model)
+
+        with patch("agent_core.agent._get_model", side_effect=fake_get_model):
+            OpenAIAgent.from_dict("test", {"mcpServers": {}, "model": "gpt-4o-mini"})
+
+        assert captured["model_name"] == "gpt-4o-mini"
+
+    def test_custom_api_type_from_config(self):
+        captured = {}
+
+        def fake_get_model(model_name, api_type):
+            captured["model_name"] = model_name
+            captured["api_type"] = api_type
+            return create_autospec(Model)
+
+        with patch("agent_core.agent._get_model", side_effect=fake_get_model):
+            OpenAIAgent.from_dict("test", {"mcpServers": {}, "apiType": "chat_completions"})
+
+        assert captured["api_type"] == "chat_completions"
 
 
 class TestTurnTruncate:
@@ -181,10 +220,131 @@ class TestFromDictMcpServers:
         types = {type(s) for s in agent.agent.mcp_servers}
         assert types == {MCPServerStreamableHttp, MCPServerStdio}
 
+    def test_disabled_http_server_is_skipped(self):
+        config = {
+            "mcpServers": {
+                "my-server": {
+                    "url": "http://localhost:8000/mcp",
+                    "enabled": False,
+                }
+            },
+        }
+        agent = OpenAIAgent.from_dict("test", config)
+        assert len(agent.agent.mcp_servers) == 0
+
+    def test_disabled_stdio_server_is_skipped(self):
+        config = {
+            "mcpServers": {
+                "my-server": {
+                    "command": "npx",
+                    "args": ["-y", "server"],
+                    "enabled": False,
+                }
+            },
+        }
+        agent = OpenAIAgent.from_dict("test", config)
+        assert len(agent.agent.mcp_servers) == 0
+
+    def test_enabled_true_server_is_included(self):
+        config = {
+            "mcpServers": {
+                "my-server": {
+                    "url": "http://localhost:8000/mcp",
+                    "enabled": True,
+                }
+            },
+        }
+        agent = OpenAIAgent.from_dict("test", config)
+        assert len(agent.agent.mcp_servers) == 1
+
+    def test_mixed_enabled_disabled_servers(self):
+        config = {
+            "mcpServers": {
+                "active": {"url": "http://localhost:8000/mcp", "enabled": True},
+                "inactive": {"command": "npx", "args": [], "enabled": False},
+            },
+        }
+        agent = OpenAIAgent.from_dict("test", config)
+        assert len(agent.agent.mcp_servers) == 1
+        assert isinstance(agent.agent.mcp_servers[0], MCPServerStreamableHttp)
+
+    def test_default_session_timeout_used_when_not_specified(self):
+        config = {
+            "mcpServers": {
+                "my-server": {"url": "http://localhost:8000/mcp"},
+            },
+        }
+        agent = OpenAIAgent.from_dict("test", config)
+        assert agent.agent.mcp_servers[0].client_session_timeout_seconds == MCP_SESSION_TIMEOUT_SECONDS
+
+    def test_per_server_timeout_http(self):
+        config = {
+            "mcpServers": {
+                "my-server": {
+                    "url": "http://localhost:8000/mcp",
+                    "timeout": 60.0,
+                }
+            },
+        }
+        agent = OpenAIAgent.from_dict("test", config)
+        assert agent.agent.mcp_servers[0].client_session_timeout_seconds == 60.0
+
+    def test_per_server_timeout_stdio(self):
+        config = {
+            "mcpServers": {
+                "my-server": {
+                    "command": "npx",
+                    "args": ["-y", "server"],
+                    "timeout": 120.0,
+                }
+            },
+        }
+        agent = OpenAIAgent.from_dict("test", config)
+        assert agent.agent.mcp_servers[0].client_session_timeout_seconds == 120.0
+
 
 class TestMaxTurnsConstant:
     def test_default_max_turns(self):
         assert MAX_TURNS == 10
+
+
+@pytest.mark.usefixtures("_stub_instructions")
+class TestFromDictMaxTurns:
+    def test_default_max_turns_when_not_in_config(self):
+        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+        assert agent.max_turns == MAX_TURNS
+
+    def test_custom_max_turns_from_config(self):
+        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}, "maxTurns": 5})
+        assert agent.max_turns == 5
+
+    @pytest.mark.anyio
+    async def test_custom_max_turns_applied_during_run(self):
+        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}, "maxTurns": 3})
+        captured_inputs = []
+
+        async def fake_run(ag, input, **kw):
+            captured_inputs.append(list(input))
+            mock_result = MagicMock()
+            mock_result.final_output = "ok"
+            mock_result.to_input_list.return_value = list(input) + [{"role": "assistant", "content": "ok"}]
+            return mock_result
+
+        session = agent._get_session(1)
+        history = []
+        for i in range(6):
+            history += [
+                {"role": "user", "content": f"u{i}"},
+                {"role": "assistant", "content": f"a{i}"},
+            ]
+        await session.add_items(history)
+
+        with patch("agent_core.agent.Runner.run", side_effect=fake_run):
+            await agent.run(chat_id=1, message="new")
+
+        sent = captured_inputs[0]
+        user_msgs = [m for m in sent if m.get("role") == "user" and m["content"] != "new"]
+        assert len(user_msgs) == 3
 
 
 class TestSessionDbPath:

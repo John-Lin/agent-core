@@ -29,6 +29,8 @@ INSTRUCTIONS_FILE = Path("instructions.md")
 MAX_TURNS = 10
 MCP_SESSION_TIMEOUT_SECONDS = 30.0
 SHELL_TIMEOUT = 30.0
+OPENAI_MODEL_DEFAULT = "gpt-5.4"
+OPENAI_API_TYPE_DEFAULT = "responses"
 
 
 def _turn_truncate(items: list[TResponseInputItem], max_turns: int) -> list[TResponseInputItem]:
@@ -62,20 +64,17 @@ def _load_instructions() -> str:
         ) from e
 
 
-def _get_model() -> OpenAIResponsesModel | OpenAIChatCompletionsModel:
-    """Create an OpenAI model from environment variables.
+def _get_model(model_name: str, api_type: str) -> OpenAIResponsesModel | OpenAIChatCompletionsModel:
+    """Create an OpenAI model instance.
 
     Uses the standard OpenAI client, which works with both OpenAI and
     Azure OpenAI v1 API (via OPENAI_BASE_URL + OPENAI_API_KEY).
 
-    OPENAI_API_TYPE controls which API the model uses:
+    api_type controls which API the model uses:
       - "responses" (default): OpenAI Responses API — recommended by the SDK
       - "chat_completions": Chat Completions API
     """
-    model_name = os.getenv("OPENAI_MODEL", "gpt-5.4")
-    api_type = os.getenv("OPENAI_API_TYPE", "responses")
     client = AsyncOpenAI()
-
     if api_type == "chat_completions":
         return OpenAIChatCompletionsModel(model=model_name, openai_client=client)
     return OpenAIResponsesModel(model=model_name, openai_client=client)
@@ -210,15 +209,19 @@ class OpenAIAgent:
         mcp_servers: list | None = None,
         tools: list | None = None,
         db_path: str = ":memory:",
+        max_turns: int = MAX_TURNS,
+        model_name: str = OPENAI_MODEL_DEFAULT,
+        api_type: str = OPENAI_API_TYPE_DEFAULT,
     ) -> None:
         self.agent = Agent(
             name=name,
             instructions=instructions,
-            model=_get_model(),
+            model=_get_model(model_name, api_type),
             mcp_servers=(mcp_servers if mcp_servers is not None else []),
             tools=(tools if tools is not None else []),
         )
         self.name = name
+        self.max_turns = max_turns
         self._db_path = db_path
         self._sessions: dict[Hashable, SQLiteSession] = {}
         self._locks: dict[Hashable, asyncio.Lock] = {}
@@ -232,10 +235,13 @@ class OpenAIAgent:
     def from_dict(cls, name: str, config: dict[str, Any]) -> OpenAIAgent:
         mcp_servers: list[MCPServerStreamableHttp | MCPServerStdio] = []
         for mcp_srv in config.get("mcpServers", {}).values():
+            if not mcp_srv.get("enabled", True):
+                continue
+            timeout = mcp_srv.get("timeout", MCP_SESSION_TIMEOUT_SECONDS)
             if "url" in mcp_srv:
                 mcp_servers.append(
                     MCPServerStreamableHttp(
-                        client_session_timeout_seconds=MCP_SESSION_TIMEOUT_SECONDS,
+                        client_session_timeout_seconds=timeout,
                         params={
                             "url": mcp_srv["url"],
                             "headers": mcp_srv.get("headers", {}),
@@ -245,7 +251,7 @@ class OpenAIAgent:
             else:
                 mcp_servers.append(
                     MCPServerStdio(
-                        client_session_timeout_seconds=MCP_SESSION_TIMEOUT_SECONDS,
+                        client_session_timeout_seconds=timeout,
                         params={
                             "command": mcp_srv["command"],
                             "args": mcp_srv.get("args", []),
@@ -260,7 +266,10 @@ class OpenAIAgent:
 
         instructions = _load_instructions()
         db_path = os.getenv("SESSION_DB_PATH", ":memory:")
-        return cls(name, instructions=instructions, mcp_servers=mcp_servers, tools=tools, db_path=db_path)
+        max_turns = config.get("maxTurns", MAX_TURNS)
+        model_name = config.get("model", OPENAI_MODEL_DEFAULT)
+        api_type = config.get("apiType", OPENAI_API_TYPE_DEFAULT)
+        return cls(name, instructions=instructions, mcp_servers=mcp_servers, tools=tools, db_path=db_path, max_turns=max_turns, model_name=model_name, api_type=api_type)
 
     async def connect(self) -> None:
         for mcp_server in self.agent.mcp_servers:
@@ -289,7 +298,7 @@ class OpenAIAgent:
         async with lock:
             session = self._get_session(chat_id)
             all_items = await session.get_items()
-            truncated = _turn_truncate(all_items, MAX_TURNS)
+            truncated = _turn_truncate(all_items, self.max_turns)
             input_items = truncated + [{"role": "user", "content": message}]
             result = await Runner.run(self.agent, input=input_items)
             new_items = result.to_input_list()[len(truncated):]
