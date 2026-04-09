@@ -13,11 +13,14 @@ from agents.models.interface import Model
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from agents.models.openai_responses import OpenAIResponsesModel
 
+from agents import SQLiteSession
+
 from agent_core.agent import MAX_TURNS
 from agent_core.agent import OpenAIAgent
 from agent_core.agent import _get_model
 from agent_core.agent import _parse_skill_description
 from agent_core.agent import _shell_executor
+from agent_core.agent import _turn_truncate
 
 
 @pytest.fixture
@@ -57,64 +60,57 @@ class TestGetModel:
         assert isinstance(model, OpenAIChatCompletionsModel)
 
 
-class TestPerChatConversations:
-    def test_separate_chats_have_independent_history(self):
-        """Different chat_ids should maintain separate message histories."""
-        agent = OpenAIAgent(name="test", instructions="test-prompt")
-        agent.append_user_message(chat_id=100, message="hello from chat 100")
-        agent.append_user_message(chat_id=200, message="hello from chat 200")
+class TestTurnTruncate:
+    def test_returns_all_items_when_under_limit(self):
+        items = [
+            {"role": "user", "content": "a"},
+            {"role": "assistant", "content": "b"},
+        ]
+        assert _turn_truncate(items, max_turns=10) == items
 
-        msgs_100 = agent.get_messages(chat_id=100)
-        msgs_200 = agent.get_messages(chat_id=200)
+    def test_returns_all_items_when_exactly_at_limit(self):
+        items = []
+        for i in range(3):
+            items += [{"role": "user", "content": f"u{i}"}, {"role": "assistant", "content": f"a{i}"}]
+        assert _turn_truncate(items, max_turns=3) == items
 
-        assert len(msgs_100) == 1
-        assert len(msgs_200) == 1
-        assert msgs_100[0]["content"] == "hello from chat 100"
-        assert msgs_200[0]["content"] == "hello from chat 200"
+    def test_truncates_oldest_turns(self):
+        items = []
+        for i in range(5):
+            items += [{"role": "user", "content": f"u{i}"}, {"role": "assistant", "content": f"a{i}"}]
 
-    def test_same_chat_accumulates_messages(self):
-        agent = OpenAIAgent(name="test", instructions="test-prompt")
-        agent.append_user_message(chat_id=100, message="first")
-        agent.append_user_message(chat_id=100, message="second")
+        result = _turn_truncate(items, max_turns=2)
 
-        msgs = agent.get_messages(chat_id=100)
-        assert len(msgs) == 2
-        assert msgs[0]["content"] == "first"
-        assert msgs[1]["content"] == "second"
+        user_msgs = [m for m in result if m["role"] == "user"]
+        assert len(user_msgs) == 2
+        assert user_msgs[0]["content"] == "u3"
+        assert user_msgs[-1]["content"] == "u4"
 
-    def test_unknown_chat_returns_empty(self):
-        agent = OpenAIAgent(name="test", instructions="test-prompt")
-        assert agent.get_messages(chat_id=999) == []
+    def test_preserves_tool_messages_within_turn(self):
+        items = [
+            {"role": "user", "content": "u0"},
+            {"role": "assistant", "content": "a0"},
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": None, "tool_calls": [{"id": "tc1"}]},
+            {"role": "tool", "content": "tool-result", "tool_call_id": "tc1"},
+            {"role": "assistant", "content": "a1"},
+        ]
 
-    def test_set_messages_replaces_history(self):
-        agent = OpenAIAgent(name="test", instructions="test-prompt")
-        agent.append_user_message(chat_id=100, message="old")
-        new_msgs = [{"role": "user", "content": "replaced"}]
-        agent.set_messages(chat_id=100, messages=new_msgs)
-        assert agent.get_messages(chat_id=100) == new_msgs
+        result = _turn_truncate(items, max_turns=1)
 
-    def test_set_messages_does_not_affect_other_chats(self):
-        agent = OpenAIAgent(name="test", instructions="test-prompt")
-        agent.append_user_message(chat_id=100, message="chat 100")
-        agent.append_user_message(chat_id=200, message="chat 200")
-        agent.set_messages(chat_id=100, messages=[])
-        assert agent.get_messages(chat_id=100) == []
-        assert len(agent.get_messages(chat_id=200)) == 1
+        assert result[0]["role"] == "user"
+        assert result[0]["content"] == "u1"
+        tool_msgs = [m for m in result if m.get("role") == "tool"]
+        assert len(tool_msgs) == 1
 
-    def test_string_chat_id(self):
-        """Slack uses thread_ts strings as chat_id."""
-        agent = OpenAIAgent(name="test", instructions="test-prompt")
-        agent.append_user_message(chat_id="1234.5678", message="slack thread")
-        assert agent.get_messages(chat_id="1234.5678")[0]["content"] == "slack thread"
+    def test_empty_list_returns_empty(self):
+        assert _turn_truncate([], max_turns=10) == []
 
-    def test_tuple_chat_id(self):
-        """Discord uses (channel_id, user_id) tuples as chat_id."""
-        agent = OpenAIAgent(name="test", instructions="test-prompt")
-        key = (111, 222)
-        agent.append_user_message(chat_id=key, message="discord msg")
-        assert agent.get_messages(chat_id=key)[0]["content"] == "discord msg"
-        # Same channel, different user — independent history.
-        assert agent.get_messages(chat_id=(111, 333)) == []
+    def test_does_not_mutate_input(self):
+        items = [{"role": "user", "content": "u0"}, {"role": "assistant", "content": "a0"}]
+        original = list(items)
+        _turn_truncate(items, max_turns=0)
+        assert items == original
 
 
 class TestInstructions:
@@ -186,72 +182,144 @@ class TestFromDictMcpServers:
         assert types == {MCPServerStreamableHttp, MCPServerStdio}
 
 
-class TestHistoryTruncation:
+class TestMaxTurnsConstant:
     def test_default_max_turns(self):
         assert MAX_TURNS == 10
 
-    def test_truncate_keeps_recent_turns(self):
+
+class TestSessionDbPath:
+    def test_default_db_path_is_memory(self):
         agent = OpenAIAgent(name="test", instructions="test-prompt")
-        # Simulate 30 turns: each turn is a user msg + assistant msg
-        for i in range(30):
-            agent.set_messages(
-                chat_id=100,
-                messages=agent.get_messages(chat_id=100)
-                + [
-                    {"role": "user", "content": f"user-{i}"},
-                    {"role": "assistant", "content": f"assistant-{i}"},
-                ],
-            )
+        session = agent._get_session(1)
+        assert session.db_path == ":memory:"
 
-        agent.truncate_history(chat_id=100)
-        msgs = agent.get_messages(chat_id=100)
+    def test_custom_db_path_used_for_sessions(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        agent = OpenAIAgent(name="test", instructions="test-prompt", db_path=db)
+        session = agent._get_session(1)
+        assert str(session.db_path) == db
 
-        # Should keep last MAX_TURNS turns (user+assistant each)
-        user_msgs = [m for m in msgs if m["role"] == "user"]
-        assert len(user_msgs) == MAX_TURNS
-        # Oldest kept should be turn (30 - MAX_TURNS)
-        assert user_msgs[0]["content"] == f"user-{30 - MAX_TURNS}"
-        # Most recent should be turn 29
-        assert user_msgs[-1]["content"] == "user-29"
+    def test_from_dict_defaults_to_memory_when_env_not_set(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "instructions.md").write_text("x", encoding="utf-8")
+        monkeypatch.delenv("SESSION_DB_PATH", raising=False)
 
-    def test_truncate_preserves_tool_messages_within_turn(self):
+        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+        session = agent._get_session(1)
+        assert session.db_path == ":memory:"
+
+    def test_from_dict_reads_session_db_path_env_var(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "instructions.md").write_text("x", encoding="utf-8")
+        db = str(tmp_path / "conv.db")
+        monkeypatch.setenv("SESSION_DB_PATH", db)
+
+        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+        session = agent._get_session(1)
+        assert str(session.db_path) == db
+
+
+class TestRunWithSession:
+    def _make_run_result(self, input_items, reply="ok"):
+        """Return a mock Runner.run result whose to_input_list() = input_items + [assistant reply]."""
+        output_items = list(input_items) + [{"role": "assistant", "content": reply}]
+        mock_result = MagicMock()
+        mock_result.final_output = reply
+        mock_result.to_input_list.return_value = output_items
+        return mock_result
+
+    @pytest.mark.anyio
+    async def test_run_returns_agent_reply(self):
         agent = OpenAIAgent(name="test", instructions="test-prompt")
-        # Build history with tool calls in a turn
+
+        async def fake_run(ag, input, **kw):
+            return self._make_run_result(input, reply="hello")
+
+        with patch("agent_core.agent.Runner.run", side_effect=fake_run):
+            result = await agent.run(chat_id=1, message="hi")
+
+        assert result == "hello"
+
+    @pytest.mark.anyio
+    async def test_run_stores_new_items_in_session(self):
+        agent = OpenAIAgent(name="test", instructions="test-prompt")
+        input_sent = []
+
+        async def fake_run(ag, input, **kw):
+            input_sent.extend(input)
+            return self._make_run_result(input, reply="pong")
+
+        with patch("agent_core.agent.Runner.run", side_effect=fake_run):
+            await agent.run(chat_id=1, message="ping")
+
+        session = agent._get_session(1)
+        saved = await session.get_items()
+        assert any(m["content"] == "ping" for m in saved if m.get("role") == "user")
+        assert any(m["content"] == "pong" for m in saved if m.get("role") == "assistant")
+
+    @pytest.mark.anyio
+    async def test_run_separate_chat_ids_have_independent_sessions(self):
+        agent = OpenAIAgent(name="test", instructions="test-prompt")
+
+        async def fake_run(ag, input, **kw):
+            return self._make_run_result(input, reply="reply")
+
+        with patch("agent_core.agent.Runner.run", side_effect=fake_run):
+            await agent.run(chat_id=100, message="from 100")
+            await agent.run(chat_id=200, message="from 200")
+
+        items_100 = await agent._get_session(100).get_items()
+        items_200 = await agent._get_session(200).get_items()
+        assert all("from 200" not in str(m) for m in items_100)
+        assert all("from 100" not in str(m) for m in items_200)
+
+    @pytest.mark.anyio
+    async def test_run_sends_truncated_history_to_runner(self):
+        agent = OpenAIAgent(name="test", instructions="test-prompt")
+        captured_inputs = []
+
+        async def fake_run(ag, input, **kw):
+            captured_inputs.append(list(input))
+            return self._make_run_result(input, reply="ok")
+
+        # Pre-fill session with more than MAX_TURNS of history
+        session = agent._get_session(1)
         history = []
-        for i in range(MAX_TURNS + 2):
-            history.append({"role": "user", "content": f"user-{i}"})
-            if i == MAX_TURNS + 1:
-                # Last turn has tool calls
-                history.append({"role": "assistant", "content": None, "tool_calls": [{"id": "tc1"}]})
-                history.append({"role": "tool", "content": "tool-result", "tool_call_id": "tc1"})
-            history.append({"role": "assistant", "content": f"assistant-{i}"})
+        for i in range(MAX_TURNS + 3):
+            history += [
+                {"role": "user", "content": f"u{i}"},
+                {"role": "assistant", "content": f"a{i}"},
+            ]
+        await session.add_items(history)
 
-        agent.set_messages(chat_id=100, messages=history)
-        agent.truncate_history(chat_id=100)
-        msgs = agent.get_messages(chat_id=100)
+        with patch("agent_core.agent.Runner.run", side_effect=fake_run):
+            await agent.run(chat_id=1, message="new")
 
-        user_msgs = [m for m in msgs if m["role"] == "user"]
+        sent = captured_inputs[0]
+        user_msgs = [m for m in sent if m.get("role") == "user" and m["content"] != "new"]
         assert len(user_msgs) == MAX_TURNS
-        # Tool messages from the last turn should be preserved
-        tool_msgs = [m for m in msgs if m.get("role") == "tool"]
-        assert len(tool_msgs) == 1
 
-    def test_no_truncation_when_under_limit(self):
+
+class TestCleanupClosesSessions:
+    @pytest.mark.anyio
+    async def test_cleanup_calls_close_on_all_sessions(self):
         agent = OpenAIAgent(name="test", instructions="test-prompt")
-        for i in range(3):
-            agent.set_messages(
-                chat_id=100,
-                messages=agent.get_messages(chat_id=100)
-                + [
-                    {"role": "user", "content": f"user-{i}"},
-                    {"role": "assistant", "content": f"assistant-{i}"},
-                ],
-            )
+        # Create two sessions
+        s1 = agent._get_session(1)
+        s2 = agent._get_session(2)
 
-        agent.truncate_history(chat_id=100)
-        msgs = agent.get_messages(chat_id=100)
-        user_msgs = [m for m in msgs if m["role"] == "user"]
-        assert len(user_msgs) == 3
+        closed = []
+        original_close = SQLiteSession.close
+
+        def tracking_close(self):
+            closed.append(self.session_id)
+            original_close(self)
+
+        with patch.object(SQLiteSession, "close", tracking_close):
+            await agent.cleanup()
+
+        assert s1.session_id in closed
+        assert s2.session_id in closed
 
 
 @pytest.mark.usefixtures("_stub_instructions")
