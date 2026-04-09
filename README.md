@@ -6,7 +6,7 @@ Shared OpenAI Agent SDK wrapper extracted from `agentic-telegram-bot`,
 Wraps the [`openai-agents`](https://pypi.org/project/openai-agents/) SDK
 with:
 
-- Per-conversation message history (any `Hashable` key)
+- Per-conversation history via SQLiteSession (any `Hashable` key; in-memory by default, persistent with `SESSION_DB_PATH`)
 - Per-conversation async lock to serialise concurrent messages
 - History truncation to a fixed number of turns
 - MCP server construction from a JSON config dict
@@ -36,3 +36,4 @@ working directory and fails fast if missing.
 | `OPENAI_API_TYPE` | `responses` (default) or `chat_completions` |
 | `SHELL_ENABLED` | Truthy to attach the local `ShellTool` |
 | `SHELL_SKILLS_DIR` | Directory of `SKILL.md` skills to mount on the shell |
+| `SESSION_DB_PATH` | SQLite file path for persistent conversation history (default: in-memory) |

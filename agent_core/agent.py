@@ -9,6 +9,7 @@ from typing import Any
 
 from agents import Agent
 from agents import Runner
+from agents import SQLiteSession
 from agents import ShellCommandRequest
 from agents import ShellTool
 from agents import ShellToolLocalEnvironment
@@ -28,6 +29,20 @@ INSTRUCTIONS_FILE = Path("instructions.md")
 MAX_TURNS = 10
 MCP_SESSION_TIMEOUT_SECONDS = 30.0
 SHELL_TIMEOUT = 30.0
+
+
+def _turn_truncate(items: list[TResponseInputItem], max_turns: int) -> list[TResponseInputItem]:
+    """Return items keeping only the last max_turns user turns (turn-aware).
+
+    A turn starts at each user message. All items between two user messages
+    (assistant replies, tool calls, tool results) belong to the preceding turn
+    and are kept intact to avoid sending orphaned tool results to the LLM.
+    """
+    user_indices = [i for i, m in enumerate(items) if m.get("role") == "user"]
+    if len(user_indices) <= max_turns:
+        return items
+    cut = user_indices[-max_turns]
+    return items[cut:]
 
 set_tracing_disabled(True)
 
@@ -182,6 +197,10 @@ class OpenAIAgent:
     Conversation history is keyed by any ``Hashable`` value chosen by the
     transport layer (e.g. an int chat id, a string thread ts, or a tuple of
     ``(channel_id, user_id)``). The agent itself does not interpret the key.
+
+    History is stored in per-chat SQLiteSession instances (in-memory by default).
+    The session is append-only; turn-based truncation happens in memory before
+    each run so the LLM never receives orphaned tool results.
     """
 
     def __init__(
@@ -190,6 +209,7 @@ class OpenAIAgent:
         instructions: str,
         mcp_servers: list | None = None,
         tools: list | None = None,
+        db_path: str = ":memory:",
     ) -> None:
         self.agent = Agent(
             name=name,
@@ -199,33 +219,14 @@ class OpenAIAgent:
             tools=(tools if tools is not None else []),
         )
         self.name = name
-        self._conversations: dict[Hashable, list[TResponseInputItem]] = {}
+        self._db_path = db_path
+        self._sessions: dict[Hashable, SQLiteSession] = {}
         self._locks: dict[Hashable, asyncio.Lock] = {}
 
-    def get_messages(self, chat_id: Hashable) -> list[TResponseInputItem]:
-        return self._conversations.get(chat_id, [])
-
-    def set_messages(self, chat_id: Hashable, messages: list[TResponseInputItem]) -> None:
-        self._conversations[chat_id] = messages
-
-    def append_user_message(self, chat_id: Hashable, message: str) -> None:
-        if chat_id not in self._conversations:
-            self._conversations[chat_id] = []
-        self._conversations[chat_id].append({"role": "user", "content": message})
-
-    def truncate_history(self, chat_id: Hashable) -> None:
-        """Keep only the last MAX_TURNS turns of conversation history.
-
-        A turn starts at each user message. All messages between two user
-        messages (assistant replies, tool calls, tool results) belong to
-        the preceding turn.
-        """
-        msgs = self.get_messages(chat_id)
-        user_indices = [i for i, m in enumerate(msgs) if m.get("role") == "user"]
-        if len(user_indices) <= MAX_TURNS:
-            return
-        cut = user_indices[-MAX_TURNS]
-        self._conversations[chat_id] = msgs[cut:]
+    def _get_session(self, chat_id: Hashable) -> SQLiteSession:
+        if chat_id not in self._sessions:
+            self._sessions[chat_id] = SQLiteSession(str(chat_id), self._db_path)
+        return self._sessions[chat_id]
 
     @classmethod
     def from_dict(cls, name: str, config: dict[str, Any]) -> OpenAIAgent:
@@ -258,7 +259,8 @@ class OpenAIAgent:
             tools.append(ShellTool(executor=_shell_executor, environment=environment))
 
         instructions = _load_instructions()
-        return cls(name, instructions=instructions, mcp_servers=mcp_servers, tools=tools)
+        db_path = os.getenv("SESSION_DB_PATH", ":memory:")
+        return cls(name, instructions=instructions, mcp_servers=mcp_servers, tools=tools, db_path=db_path)
 
     async def connect(self) -> None:
         for mcp_server in self.agent.mcp_servers:
@@ -274,24 +276,30 @@ class OpenAIAgent:
     async def run(self, chat_id: Hashable, message: str) -> str:
         """Run the agent for one user message.
 
-        A per-conversation async lock ensures that when two messages arrive
-        for the same ``chat_id`` in quick succession, they are processed
-        sequentially. Without the lock, the second ``await Runner.run`` could
-        start before the first one finishes, and whichever completes last
-        would overwrite the conversation history — silently dropping the
-        other message and its reply. Different conversations are unaffected
-        and still run in parallel.
+        History is loaded from the session, truncated in memory to MAX_TURNS
+        (turn-aware, so tool call groups are never split), then passed to the
+        runner together with the new user message. Only the newly generated
+        items are appended back to the session, keeping it append-only.
+
+        A per-conversation async lock ensures that concurrent messages for the
+        same chat_id are processed sequentially while different chats run in
+        parallel.
         """
         lock = self._locks.setdefault(chat_id, asyncio.Lock())
         async with lock:
-            history = self.get_messages(chat_id) + [{"role": "user", "content": message}]
-            result = await Runner.run(self.agent, input=history)
-            self.set_messages(chat_id, result.to_input_list())
-            self.truncate_history(chat_id)
+            session = self._get_session(chat_id)
+            all_items = await session.get_items()
+            truncated = _turn_truncate(all_items, MAX_TURNS)
+            input_items = truncated + [{"role": "user", "content": message}]
+            result = await Runner.run(self.agent, input=input_items)
+            new_items = result.to_input_list()[len(truncated):]
+            await session.add_items(new_items)
             return str(result.final_output)
 
     async def cleanup(self) -> None:
         """Clean up resources."""
+        for session in self._sessions.values():
+            session.close()
         for mcp_server in self.agent.mcp_servers:
             try:
                 await mcp_server.cleanup()
