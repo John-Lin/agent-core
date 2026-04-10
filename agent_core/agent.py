@@ -6,14 +6,15 @@ import os
 from collections.abc import Hashable
 from pathlib import Path
 from typing import Any
+from typing import cast
 
 from agents import Agent
 from agents import Runner
-from agents import SQLiteSession
 from agents import ShellCommandRequest
 from agents import ShellTool
 from agents import ShellToolLocalEnvironment
 from agents import ShellToolLocalSkill
+from agents import SQLiteSession
 from agents import TResponseInputItem
 from agents.mcp import MCPServerStdio
 from agents.mcp import MCPServerStreamableHttp
@@ -45,6 +46,7 @@ def _turn_truncate(items: list[TResponseInputItem], max_turns: int) -> list[TRes
         return items
     cut = user_indices[-max_turns]
     return items[cut:]
+
 
 set_tracing_disabled(True)
 
@@ -269,7 +271,16 @@ class OpenAIAgent:
         max_turns = config.get("maxTurns", MAX_TURNS)
         model_name = config.get("model", OPENAI_MODEL_DEFAULT)
         api_type = config.get("apiType", OPENAI_API_TYPE_DEFAULT)
-        return cls(name, instructions=instructions, mcp_servers=mcp_servers, tools=tools, db_path=db_path, max_turns=max_turns, model_name=model_name, api_type=api_type)
+        return cls(
+            name,
+            instructions=instructions,
+            mcp_servers=mcp_servers,
+            tools=tools,
+            db_path=db_path,
+            max_turns=max_turns,
+            model_name=model_name,
+            api_type=api_type,
+        )
 
     async def connect(self) -> None:
         for mcp_server in self.agent.mcp_servers:
@@ -299,9 +310,9 @@ class OpenAIAgent:
             session = self._get_session(chat_id)
             all_items = await session.get_items()
             truncated = _turn_truncate(all_items, self.max_turns)
-            input_items = truncated + [{"role": "user", "content": message}]
+            input_items = truncated + [cast(TResponseInputItem, {"role": "user", "content": message})]
             result = await Runner.run(self.agent, input=input_items)
-            new_items = result.to_input_list()[len(truncated):]
+            new_items = result.to_input_list()[len(truncated) :]
             await session.add_items(new_items)
             return str(result.final_output)
 

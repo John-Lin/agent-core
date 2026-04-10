@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
+from typing import cast
 from unittest.mock import MagicMock
 from unittest.mock import create_autospec
 from unittest.mock import patch
 
 import pytest
 from agents import ShellTool
+from agents import SQLiteSession
+from agents import TResponseInputItem
 from agents.mcp import MCPServerStdio
 from agents.mcp import MCPServerStreamableHttp
 from agents.models.interface import Model
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from agents.models.openai_responses import OpenAIResponsesModel
-
-from agents import SQLiteSession
 
 from agent_core.agent import MAX_TURNS
 from agent_core.agent import MCP_SESSION_TIMEOUT_SECONDS
@@ -68,7 +70,9 @@ class TestFromDictModel:
         with patch("agent_core.agent._get_model", side_effect=fake_get_model):
             OpenAIAgent.from_dict("test", {"mcpServers": {}})
 
-        from agent_core.agent import OPENAI_MODEL_DEFAULT, OPENAI_API_TYPE_DEFAULT
+        from agent_core.agent import OPENAI_API_TYPE_DEFAULT
+        from agent_core.agent import OPENAI_MODEL_DEFAULT
+
         assert captured["model_name"] == OPENAI_MODEL_DEFAULT
         assert captured["api_type"] == OPENAI_API_TYPE_DEFAULT
 
@@ -101,44 +105,62 @@ class TestFromDictModel:
 
 class TestTurnTruncate:
     def test_returns_all_items_when_under_limit(self):
-        items = [
-            {"role": "user", "content": "a"},
-            {"role": "assistant", "content": "b"},
-        ]
+        items: list[TResponseInputItem] = cast(
+            list[TResponseInputItem],
+            [
+                {"role": "user", "content": "a"},
+                {"role": "assistant", "content": "b"},
+            ],
+        )
         assert _turn_truncate(items, max_turns=10) == items
 
     def test_returns_all_items_when_exactly_at_limit(self):
-        items = []
+        items: list[TResponseInputItem] = []
         for i in range(3):
-            items += [{"role": "user", "content": f"u{i}"}, {"role": "assistant", "content": f"a{i}"}]
+            items += cast(
+                list[TResponseInputItem],
+                [
+                    {"role": "user", "content": f"u{i}"},
+                    {"role": "assistant", "content": f"a{i}"},
+                ],
+            )
         assert _turn_truncate(items, max_turns=3) == items
 
     def test_truncates_oldest_turns(self):
-        items = []
+        items: list[TResponseInputItem] = []
         for i in range(5):
-            items += [{"role": "user", "content": f"u{i}"}, {"role": "assistant", "content": f"a{i}"}]
+            items += cast(
+                list[TResponseInputItem],
+                [
+                    {"role": "user", "content": f"u{i}"},
+                    {"role": "assistant", "content": f"a{i}"},
+                ],
+            )
 
-        result = _turn_truncate(items, max_turns=2)
+        result: list[dict[str, Any]] = cast(list[dict[str, Any]], _turn_truncate(items, max_turns=2))
 
-        user_msgs = [m for m in result if m["role"] == "user"]
+        user_msgs = [m for m in result if m.get("role") == "user"]
         assert len(user_msgs) == 2
         assert user_msgs[0]["content"] == "u3"
         assert user_msgs[-1]["content"] == "u4"
 
     def test_preserves_tool_messages_within_turn(self):
-        items = [
-            {"role": "user", "content": "u0"},
-            {"role": "assistant", "content": "a0"},
-            {"role": "user", "content": "u1"},
-            {"role": "assistant", "content": None, "tool_calls": [{"id": "tc1"}]},
-            {"role": "tool", "content": "tool-result", "tool_call_id": "tc1"},
-            {"role": "assistant", "content": "a1"},
-        ]
+        items: list[TResponseInputItem] = cast(
+            list[TResponseInputItem],
+            [
+                {"role": "user", "content": "u0"},
+                {"role": "assistant", "content": "a0"},
+                {"role": "user", "content": "u1"},
+                {"role": "assistant", "content": None, "tool_calls": [{"id": "tc1"}]},
+                {"role": "tool", "content": "tool-result", "tool_call_id": "tc1"},
+                {"role": "assistant", "content": "a1"},
+            ],
+        )
 
-        result = _turn_truncate(items, max_turns=1)
+        result: list[dict[str, Any]] = cast(list[dict[str, Any]], _turn_truncate(items, max_turns=1))
 
-        assert result[0]["role"] == "user"
-        assert result[0]["content"] == "u1"
+        assert result[0].get("role") == "user"
+        assert result[0].get("content") == "u1"
         tool_msgs = [m for m in result if m.get("role") == "tool"]
         assert len(tool_msgs) == 1
 
@@ -146,7 +168,13 @@ class TestTurnTruncate:
         assert _turn_truncate([], max_turns=10) == []
 
     def test_does_not_mutate_input(self):
-        items = [{"role": "user", "content": "u0"}, {"role": "assistant", "content": "a0"}]
+        items: list[TResponseInputItem] = cast(
+            list[TResponseInputItem],
+            [
+                {"role": "user", "content": "u0"},
+                {"role": "assistant", "content": "a0"},
+            ],
+        )
         original = list(items)
         _turn_truncate(items, max_turns=0)
         assert items == original
@@ -275,7 +303,7 @@ class TestFromDictMcpServers:
             },
         }
         agent = OpenAIAgent.from_dict("test", config)
-        assert agent.agent.mcp_servers[0].client_session_timeout_seconds == MCP_SESSION_TIMEOUT_SECONDS
+        assert cast(Any, agent.agent.mcp_servers[0]).client_session_timeout_seconds == MCP_SESSION_TIMEOUT_SECONDS
 
     def test_per_server_timeout_http(self):
         config = {
@@ -287,7 +315,7 @@ class TestFromDictMcpServers:
             },
         }
         agent = OpenAIAgent.from_dict("test", config)
-        assert agent.agent.mcp_servers[0].client_session_timeout_seconds == 60.0
+        assert cast(Any, agent.agent.mcp_servers[0]).client_session_timeout_seconds == 60.0
 
     def test_per_server_timeout_stdio(self):
         config = {
@@ -300,7 +328,7 @@ class TestFromDictMcpServers:
             },
         }
         agent = OpenAIAgent.from_dict("test", config)
-        assert agent.agent.mcp_servers[0].client_session_timeout_seconds == 120.0
+        assert cast(Any, agent.agent.mcp_servers[0]).client_session_timeout_seconds == 120.0
 
 
 class TestMaxTurnsConstant:
@@ -413,7 +441,7 @@ class TestRunWithSession:
             await agent.run(chat_id=1, message="ping")
 
         session = agent._get_session(1)
-        saved = await session.get_items()
+        saved: list[dict[str, Any]] = cast(list[dict[str, Any]], await session.get_items())
         assert any(m["content"] == "ping" for m in saved if m.get("role") == "user")
         assert any(m["content"] == "pong" for m in saved if m.get("role") == "assistant")
 
@@ -539,7 +567,8 @@ class TestShellToolConfiguration:
         agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
 
         shell_tool = self._get_shell_tools(agent)[0]
-        skill = shell_tool.environment["skills"][0]
+        env = cast(dict[str, Any], shell_tool.environment)
+        skill = env["skills"][0]
         assert skill["name"] == "my-skill"
         assert skill["description"] == "A test skill"
         assert skill["path"] == str(skill_dir)
@@ -563,7 +592,7 @@ class TestShellToolConfiguration:
         agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
 
         shell_tool = self._get_shell_tools(agent)[0]
-        assert len(shell_tool.environment["skills"]) == 2
+        assert len(cast(dict[str, Any], shell_tool.environment)["skills"]) == 2
 
     def test_directory_without_skill_md_is_skipped(self, tmp_path, monkeypatch):
         (tmp_path / "not-a-skill").mkdir()
@@ -573,7 +602,7 @@ class TestShellToolConfiguration:
         agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
 
         shell_tool = self._get_shell_tools(agent)[0]
-        skills = shell_tool.environment["skills"]
+        skills = cast(dict[str, Any], shell_tool.environment)["skills"]
         assert len(skills) == 1
         assert skills[0]["name"] == "real-skill"
 
@@ -597,7 +626,7 @@ class TestShellToolConfiguration:
         agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
 
         shell_tool = self._get_shell_tools(agent)[0]
-        skills = shell_tool.environment["skills"]
+        skills = cast(dict[str, Any], shell_tool.environment)["skills"]
         assert len(skills) == 1
         assert skills[0]["name"] == "good-skill"
 
@@ -621,7 +650,7 @@ class TestShellToolConfiguration:
         agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
 
         shell_tool = self._get_shell_tools(agent)[0]
-        skills = shell_tool.environment["skills"]
+        skills = cast(dict[str, Any], shell_tool.environment)["skills"]
         assert len(skills) == 1
         assert skills[0]["name"] == "good-skill"
 

@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .coverage
-.mypy_cache/
+.ty_cache/
 .ruff_cache/
 dist/
 build/
