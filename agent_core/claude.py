@@ -98,7 +98,7 @@ class ClaudeAgent:
         self._allowed_tools = allowed_tools if allowed_tools is not None else []
         self._model_name = model_name
         self._max_turns = max_turns
-        self._setting_sources = setting_sources
+        self._setting_sources = setting_sources if setting_sources is not None else ["project"]
         self._session_map = ClaudeSessionMap(db_path)
         self._locks: dict[Hashable, asyncio.Lock] = {}
 

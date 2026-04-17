@@ -224,6 +224,10 @@ class TestFromDict:
         agent = ClaudeAgent.from_dict("t", {})
         assert agent._setting_sources == ["project"]
 
+    def test_constructor_default_setting_sources_is_project(self, fake_query):  # noqa: ARG002
+        agent = ClaudeAgent(name="t", instructions="sys")
+        assert agent._setting_sources == ["project"]
+
     def test_shell_enabled_allows_read_only_plus_bash(self, stub_instructions, fake_query, monkeypatch):  # noqa: ARG002
         monkeypatch.setenv("SHELL_ENABLED", "1")
         agent = ClaudeAgent.from_dict("t", {})
