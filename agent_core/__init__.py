@@ -12,14 +12,18 @@ __all__ = ["ClaudeAgent", "ClaudeAgentError", "OpenAIAgent", "build_agent", "env
 
 
 def build_agent(name: str, config: dict[str, Any]) -> AIAgent:
-    """Build an agent from a config dict, dispatching on ``provider``.
+    """Build an agent from a config dict, dispatching on ``provider.type``.
 
-    Defaults to ``"openai"`` when the key is absent so existing configs
-    keep working unchanged.
+    ``provider`` is a tagged union: a dict with a ``type`` key plus any
+    provider-specific fields (``model``, ``apiType``, ``allowedTools``).
+    When absent, defaults to an empty OpenAI provider config.
     """
-    provider = config.get("provider", "openai")
-    if provider == "openai":
+    provider = config.get("provider", {"type": "openai"})
+    if not isinstance(provider, dict) or "type" not in provider:
+        raise ValueError("'provider' must be a dict with a 'type' key")
+    ptype = provider["type"]
+    if ptype == "openai":
         return OpenAIAgent.from_dict(name, config)
-    if provider == "claude":
+    if ptype == "anthropic":
         return ClaudeAgent.from_dict(name, config)
-    raise ValueError(f"Unknown provider: {provider!r}")
+    raise ValueError(f"Unknown provider type: {ptype!r}")

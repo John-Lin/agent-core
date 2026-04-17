@@ -15,7 +15,6 @@ from .env import env_flag
 from .instructions import _load_instructions
 from .session_map import ClaudeSessionMap
 
-MAX_TURNS = 10
 DEFAULT_SHELL_TOOLS = ["Bash", "Read", "Glob", "Grep"]
 
 
@@ -33,7 +32,6 @@ class ClaudeAgentError(Exception):
         super().__init__(message)
         self.subtype = subtype
         self.session_id = session_id
-
 
 
 def _transform_mcp_servers(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -60,9 +58,7 @@ def _transform_mcp_servers(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str
                 entry["env"] = srv["env"]
             out[name] = entry
         else:
-            raise ValueError(
-                f"MCP server {name!r} must have either 'url' (HTTP) or 'command' (stdio)"
-            )
+            raise ValueError(f"MCP server {name!r} must have either 'url' (HTTP) or 'command' (stdio)")
     return out
 
 
@@ -82,7 +78,7 @@ class ClaudeAgent:
         mcp_servers: dict[str, dict[str, Any]] | None = None,
         allowed_tools: list[str] | None = None,
         db_path: str = ":memory:",
-        max_turns: int = MAX_TURNS,
+        max_turns: int | None = None,
         model_name: str | None = None,
         setting_sources: list[str] | None = None,
     ) -> None:
@@ -100,9 +96,10 @@ class ClaudeAgent:
     def from_dict(cls, name: str, config: dict[str, Any]) -> ClaudeAgent:
         mcp_servers = _transform_mcp_servers(config.get("mcpServers", {}))
 
+        provider_cfg = config.get("provider") or {}
         shell_enabled = env_flag("SHELL_ENABLED")
         tools: list[str] = list(DEFAULT_SHELL_TOOLS) if shell_enabled else []
-        for extra in config.get("allowedTools", []):
+        for extra in provider_cfg.get("allowedTools", []):
             if extra not in tools:
                 tools.append(extra)
         # Always scope settings to the project. Leaving this None would make
@@ -113,8 +110,7 @@ class ClaudeAgent:
 
         instructions = _load_instructions()
         db_path = os.getenv("SESSION_DB_PATH", ":memory:")
-        max_turns = config.get("maxTurns", MAX_TURNS)
-        model_name = config.get("model")
+        model_name = provider_cfg.get("model")
 
         return cls(
             name,
@@ -122,7 +118,6 @@ class ClaudeAgent:
             mcp_servers=mcp_servers,
             allowed_tools=tools,
             db_path=db_path,
-            max_turns=max_turns,
             model_name=model_name,
             setting_sources=setting_sources,
         )

@@ -34,13 +34,21 @@ class TestBuildAgent:
         assert isinstance(agent, OpenAIAgent)
 
     def test_explicit_openai_provider(self, stub_instructions):  # noqa: ARG002
-        agent = build_agent("t", {"provider": "openai"})
+        agent = build_agent("t", {"provider": {"type": "openai"}})
         assert isinstance(agent, OpenAIAgent)
 
-    def test_claude_provider(self, stub_instructions):  # noqa: ARG002
-        agent = build_agent("t", {"provider": "claude"})
+    def test_anthropic_provider(self, stub_instructions):  # noqa: ARG002
+        agent = build_agent("t", {"provider": {"type": "anthropic"}})
         assert isinstance(agent, ClaudeAgent)
 
-    def test_unknown_provider_raises(self, stub_instructions):  # noqa: ARG002
-        with pytest.raises(ValueError, match="Unknown provider"):
-            build_agent("t", {"provider": "gemini"})
+    def test_unknown_provider_type_raises(self, stub_instructions):  # noqa: ARG002
+        with pytest.raises(ValueError, match="Unknown provider type"):
+            build_agent("t", {"provider": {"type": "gemini"}})
+
+    def test_provider_must_be_dict(self, stub_instructions):  # noqa: ARG002
+        with pytest.raises(ValueError, match="must be a dict"):
+            build_agent("t", {"provider": "openai"})
+
+    def test_provider_must_have_type(self, stub_instructions):  # noqa: ARG002
+        with pytest.raises(ValueError, match="must be a dict"):
+            build_agent("t", {"provider": {"model": "x"}})

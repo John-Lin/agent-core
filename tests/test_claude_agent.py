@@ -12,7 +12,6 @@ from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk import ResultMessage
 from claude_agent_sdk import TextBlock
 
-from agent_core.claude import MAX_TURNS
 from agent_core.claude import ClaudeAgent
 from agent_core.claude import ClaudeAgentError
 
@@ -207,16 +206,15 @@ class TestFromDict:
         assert agent._model_name is None
 
     def test_model_from_config(self, stub_instructions, fake_query):  # noqa: ARG002
-        agent = ClaudeAgent.from_dict("t", {"model": "claude-sonnet-4-6"})
+        agent = ClaudeAgent.from_dict(
+            "t",
+            {"provider": {"type": "anthropic", "model": "claude-sonnet-4-6"}},
+        )
         assert agent._model_name == "claude-sonnet-4-6"
 
-    def test_max_turns_default(self, stub_instructions, fake_query):  # noqa: ARG002
+    def test_max_turns_default_is_none(self, stub_instructions, fake_query):  # noqa: ARG002
         agent = ClaudeAgent.from_dict("t", {})
-        assert agent._max_turns == MAX_TURNS
-
-    def test_max_turns_from_config(self, stub_instructions, fake_query):  # noqa: ARG002
-        agent = ClaudeAgent.from_dict("t", {"maxTurns": 3})
-        assert agent._max_turns == 3
+        assert agent._max_turns is None
 
     def test_shell_disabled_yields_no_allowed_tools(self, stub_instructions, fake_query):  # noqa: ARG002
         agent = ClaudeAgent.from_dict("t", {})
@@ -238,13 +236,19 @@ class TestFromDict:
 
     def test_config_allowed_tools_extend_defaults(self, stub_instructions, fake_query, monkeypatch):  # noqa: ARG002
         monkeypatch.setenv("SHELL_ENABLED", "1")
-        agent = ClaudeAgent.from_dict("t", {"allowedTools": ["WebFetch", "Write"]})
+        agent = ClaudeAgent.from_dict(
+            "t",
+            {"provider": {"type": "anthropic", "allowedTools": ["WebFetch", "Write"]}},
+        )
         assert "WebFetch" in agent._allowed_tools
         assert "Write" in agent._allowed_tools
         assert "Bash" in agent._allowed_tools  # base kept
 
     def test_config_allowed_tools_without_shell_still_applied(self, stub_instructions, fake_query):  # noqa: ARG002
-        agent = ClaudeAgent.from_dict("t", {"allowedTools": ["WebFetch"]})
+        agent = ClaudeAgent.from_dict(
+            "t",
+            {"provider": {"type": "anthropic", "allowedTools": ["WebFetch"]}},
+        )
         assert agent._allowed_tools == ["WebFetch"]
 
     def test_mcp_stdio_server_transformed(self, stub_instructions, fake_query):  # noqa: ARG002
@@ -299,7 +303,7 @@ class TestOptionsWiring:
             "t",
             {
                 "mcpServers": {"srv": {"command": "x"}},
-                "allowedTools": ["WebFetch"],
+                "provider": {"type": "anthropic", "allowedTools": ["WebFetch"]},
             },
         )
         try:
