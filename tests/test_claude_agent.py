@@ -218,7 +218,10 @@ class TestFromDict:
         assert agent._max_turns == MAX_TURNS
 
     def test_max_turns_from_config(self, stub_instructions, fake_query):  # noqa: ARG002
-        agent = ClaudeAgent.from_dict("t", {"maxTurns": 3})
+        agent = ClaudeAgent.from_dict(
+            "t",
+            {"provider": {"type": "anthropic", "maxTurns": 3}},
+        )
         assert agent._max_turns == 3
 
     def test_shell_disabled_yields_no_allowed_tools(self, stub_instructions, fake_query):  # noqa: ARG002

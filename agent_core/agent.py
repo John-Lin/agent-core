@@ -26,7 +26,7 @@ from openai import AsyncOpenAI
 from .env import env_flag
 from .instructions import _load_instructions
 
-MAX_TURNS = 10
+HISTORY_TURNS_DEFAULT = 10
 MCP_SESSION_TIMEOUT_SECONDS = 30.0
 SHELL_TIMEOUT = 30.0
 OPENAI_MODEL_DEFAULT = "gpt-5.4"
@@ -195,7 +195,7 @@ class OpenAIAgent:
         mcp_servers: list | None = None,
         tools: list | None = None,
         db_path: str = ":memory:",
-        max_turns: int = MAX_TURNS,
+        history_turns: int = HISTORY_TURNS_DEFAULT,
         model_name: str = OPENAI_MODEL_DEFAULT,
         api_type: str = OPENAI_API_TYPE_DEFAULT,
     ) -> None:
@@ -207,7 +207,7 @@ class OpenAIAgent:
             tools=(tools if tools is not None else []),
         )
         self.name = name
-        self.max_turns = max_turns
+        self.history_turns = history_turns
         self._db_path = db_path
         self._sessions: dict[Hashable, SQLiteSession] = {}
         self._locks: dict[Hashable, asyncio.Lock] = {}
@@ -252,8 +252,8 @@ class OpenAIAgent:
 
         instructions = _load_instructions()
         db_path = os.getenv("SESSION_DB_PATH", ":memory:")
-        max_turns = config.get("maxTurns", MAX_TURNS)
         provider_cfg = config.get("provider") or {}
+        history_turns = provider_cfg.get("historyTurns", HISTORY_TURNS_DEFAULT)
         model_name = provider_cfg.get("model", OPENAI_MODEL_DEFAULT)
         api_type = provider_cfg.get("apiType", OPENAI_API_TYPE_DEFAULT)
         return cls(
@@ -262,7 +262,7 @@ class OpenAIAgent:
             mcp_servers=mcp_servers,
             tools=tools,
             db_path=db_path,
-            max_turns=max_turns,
+            history_turns=history_turns,
             model_name=model_name,
             api_type=api_type,
         )
@@ -281,10 +281,11 @@ class OpenAIAgent:
     async def run(self, chat_id: Hashable, message: str) -> str:
         """Run the agent for one user message.
 
-        History is loaded from the session, truncated in memory to MAX_TURNS
-        (turn-aware, so tool call groups are never split), then passed to the
-        runner together with the new user message. Only the newly generated
-        items are appended back to the session, keeping it append-only.
+        History is loaded from the session, truncated in memory to
+        ``history_turns`` (turn-aware, so tool call groups are never split),
+        then passed to the runner together with the new user message. Only
+        the newly generated items are appended back to the session, keeping
+        it append-only.
 
         A per-conversation async lock ensures that concurrent messages for the
         same chat_id are processed sequentially while different chats run in
@@ -294,7 +295,7 @@ class OpenAIAgent:
         async with lock:
             session = self._get_session(chat_id)
             all_items = await session.get_items()
-            truncated = _turn_truncate(all_items, self.max_turns)
+            truncated = _turn_truncate(all_items, self.history_turns)
             input_items = truncated + [cast(TResponseInputItem, {"role": "user", "content": message})]
             result = await Runner.run(self.agent, input=input_items)
             new_items = result.to_input_list()[len(truncated) :]

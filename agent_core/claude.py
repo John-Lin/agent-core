@@ -111,7 +111,7 @@ class ClaudeAgent:
 
         instructions = _load_instructions()
         db_path = os.getenv("SESSION_DB_PATH", ":memory:")
-        max_turns = config.get("maxTurns", MAX_TURNS)
+        max_turns = provider_cfg.get("maxTurns", MAX_TURNS)
         model_name = provider_cfg.get("model")
 
         return cls(

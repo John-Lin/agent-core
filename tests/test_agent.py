@@ -17,7 +17,7 @@ from agents.models.interface import Model
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from agents.models.openai_responses import OpenAIResponsesModel
 
-from agent_core.agent import MAX_TURNS
+from agent_core.agent import HISTORY_TURNS_DEFAULT
 from agent_core.agent import MCP_SESSION_TIMEOUT_SECONDS
 from agent_core.agent import OpenAIAgent
 from agent_core.agent import _get_model
@@ -337,24 +337,30 @@ class TestFromDictMcpServers:
         assert cast(Any, agent.agent.mcp_servers[0]).client_session_timeout_seconds == 120.0
 
 
-class TestMaxTurnsConstant:
-    def test_default_max_turns(self):
-        assert MAX_TURNS == 10
+class TestHistoryTurnsConstant:
+    def test_default_history_turns(self):
+        assert HISTORY_TURNS_DEFAULT == 10
 
 
 @pytest.mark.usefixtures("_stub_instructions")
-class TestFromDictMaxTurns:
-    def test_default_max_turns_when_not_in_config(self):
+class TestFromDictHistoryTurns:
+    def test_default_history_turns_when_not_in_config(self):
         agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
-        assert agent.max_turns == MAX_TURNS
+        assert agent.history_turns == HISTORY_TURNS_DEFAULT
 
-    def test_custom_max_turns_from_config(self):
-        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}, "maxTurns": 5})
-        assert agent.max_turns == 5
+    def test_custom_history_turns_from_config(self):
+        agent = OpenAIAgent.from_dict(
+            "test",
+            {"mcpServers": {}, "provider": {"type": "openai", "historyTurns": 5}},
+        )
+        assert agent.history_turns == 5
 
     @pytest.mark.anyio
-    async def test_custom_max_turns_applied_during_run(self):
-        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}, "maxTurns": 3})
+    async def test_custom_history_turns_applied_during_run(self):
+        agent = OpenAIAgent.from_dict(
+            "test",
+            {"mcpServers": {}, "provider": {"type": "openai", "historyTurns": 3}},
+        )
         captured_inputs = []
 
         async def fake_run(ag, input, **kw):
@@ -476,10 +482,10 @@ class TestRunWithSession:
             captured_inputs.append(list(input))
             return self._make_run_result(input, reply="ok")
 
-        # Pre-fill session with more than MAX_TURNS of history
+        # Pre-fill session with more than HISTORY_TURNS_DEFAULT of history
         session = agent._get_session(1)
         history = []
-        for i in range(MAX_TURNS + 3):
+        for i in range(HISTORY_TURNS_DEFAULT + 3):
             history += [
                 {"role": "user", "content": f"u{i}"},
                 {"role": "assistant", "content": f"a{i}"},
@@ -491,7 +497,7 @@ class TestRunWithSession:
 
         sent = captured_inputs[0]
         user_msgs = [m for m in sent if m.get("role") == "user" and m["content"] != "new"]
-        assert len(user_msgs) == MAX_TURNS
+        assert len(user_msgs) == HISTORY_TURNS_DEFAULT
 
 
 class TestCleanupClosesSessions:
