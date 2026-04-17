@@ -85,7 +85,10 @@ class TestFromDictModel:
             return create_autospec(Model)
 
         with patch("agent_core.agent._get_model", side_effect=fake_get_model):
-            OpenAIAgent.from_dict("test", {"mcpServers": {}, "model": "gpt-4o-mini"})
+            OpenAIAgent.from_dict(
+                "test",
+                {"mcpServers": {}, "provider": {"type": "openai", "model": "gpt-4o-mini"}},
+            )
 
         assert captured["model_name"] == "gpt-4o-mini"
 
@@ -98,7 +101,10 @@ class TestFromDictModel:
             return create_autospec(Model)
 
         with patch("agent_core.agent._get_model", side_effect=fake_get_model):
-            OpenAIAgent.from_dict("test", {"mcpServers": {}, "apiType": "chat_completions"})
+            OpenAIAgent.from_dict(
+                "test",
+                {"mcpServers": {}, "provider": {"type": "openai", "apiType": "chat_completions"}},
+            )
 
         assert captured["api_type"] == "chat_completions"
 

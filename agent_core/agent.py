@@ -50,7 +50,6 @@ def _turn_truncate(items: list[TResponseInputItem], max_turns: int) -> list[TRes
 set_tracing_disabled(True)
 
 
-
 def _get_model(model_name: str, api_type: str) -> OpenAIResponsesModel | OpenAIChatCompletionsModel:
     """Create an OpenAI model instance.
 
@@ -254,8 +253,9 @@ class OpenAIAgent:
         instructions = _load_instructions()
         db_path = os.getenv("SESSION_DB_PATH", ":memory:")
         max_turns = config.get("maxTurns", MAX_TURNS)
-        model_name = config.get("model", OPENAI_MODEL_DEFAULT)
-        api_type = config.get("apiType", OPENAI_API_TYPE_DEFAULT)
+        provider_cfg = config.get("provider") or {}
+        model_name = provider_cfg.get("model", OPENAI_MODEL_DEFAULT)
+        api_type = provider_cfg.get("apiType", OPENAI_API_TYPE_DEFAULT)
         return cls(
             name,
             instructions=instructions,
