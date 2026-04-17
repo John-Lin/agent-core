@@ -12,7 +12,6 @@ from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk import ResultMessage
 from claude_agent_sdk import TextBlock
 
-from agent_core.claude import MAX_TURNS
 from agent_core.claude import ClaudeAgent
 from agent_core.claude import ClaudeAgentError
 
@@ -213,16 +212,9 @@ class TestFromDict:
         )
         assert agent._model_name == "claude-sonnet-4-6"
 
-    def test_max_turns_default(self, stub_instructions, fake_query):  # noqa: ARG002
+    def test_max_turns_default_is_none(self, stub_instructions, fake_query):  # noqa: ARG002
         agent = ClaudeAgent.from_dict("t", {})
-        assert agent._max_turns == MAX_TURNS
-
-    def test_max_turns_from_config(self, stub_instructions, fake_query):  # noqa: ARG002
-        agent = ClaudeAgent.from_dict(
-            "t",
-            {"provider": {"type": "anthropic", "maxTurns": 3}},
-        )
-        assert agent._max_turns == 3
+        assert agent._max_turns is None
 
     def test_shell_disabled_yields_no_allowed_tools(self, stub_instructions, fake_query):  # noqa: ARG002
         agent = ClaudeAgent.from_dict("t", {})

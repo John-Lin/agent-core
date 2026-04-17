@@ -15,7 +15,6 @@ from .env import env_flag
 from .instructions import _load_instructions
 from .session_map import ClaudeSessionMap
 
-MAX_TURNS = 10
 DEFAULT_SHELL_TOOLS = ["Bash", "Read", "Glob", "Grep"]
 
 
@@ -79,7 +78,7 @@ class ClaudeAgent:
         mcp_servers: dict[str, dict[str, Any]] | None = None,
         allowed_tools: list[str] | None = None,
         db_path: str = ":memory:",
-        max_turns: int = MAX_TURNS,
+        max_turns: int | None = None,
         model_name: str | None = None,
         setting_sources: list[str] | None = None,
     ) -> None:
@@ -111,7 +110,6 @@ class ClaudeAgent:
 
         instructions = _load_instructions()
         db_path = os.getenv("SESSION_DB_PATH", ":memory:")
-        max_turns = provider_cfg.get("maxTurns", MAX_TURNS)
         model_name = provider_cfg.get("model")
 
         return cls(
@@ -120,7 +118,6 @@ class ClaudeAgent:
             mcp_servers=mcp_servers,
             allowed_tools=tools,
             db_path=db_path,
-            max_turns=max_turns,
             model_name=model_name,
             setting_sources=setting_sources,
         )

@@ -65,7 +65,6 @@ config = {
         "type": "anthropic",
         "model": "claude-sonnet-4-6",  # optional, default: SDK's default
         "allowedTools": ["WebFetch"],  # optional; added on top of the shell set
-        "maxTurns": 10,                # optional, default: 10 — agent loop limit per query
     },
     "mcpServers": {
         "my-stdio": {
