@@ -85,10 +85,14 @@ Differences from the OpenAI provider:
   (e.g. `WorkingDirectory=` in systemd, `WORKDIR` in Docker) or resume
   will silently fall back to a fresh session.
 - `apiType` is ignored.
-- `SHELL_ENABLED` enables the read-only toolset plus `Bash`, and turns
-  on `setting_sources=["project"]` so `.claude/` skills under `cwd`
-  are discovered automatically. Extra tools (e.g. `WebFetch`, `Write`,
-  `Edit`) go in `config["allowedTools"]`.
+- Settings are always scoped to `setting_sources=["project"]` so the
+  bot only picks up `.claude/` inside its deployment cwd. The host
+  user's `~/.claude/` (personal MCP servers, skills, subagents, slash
+  commands) is **never** inherited — otherwise a bot would silently
+  run with whatever the server's user has configured.
+- `SHELL_ENABLED` enables the read-only toolset plus `Bash`. Extra
+  tools (e.g. `WebFetch`, `Write`, `Edit`) go in
+  `config["allowedTools"]`.
 - All tool execution happens locally in the CLI subprocess the SDK
   spawns — there is no hosted sandbox.
 

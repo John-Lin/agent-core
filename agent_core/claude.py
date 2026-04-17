@@ -95,7 +95,11 @@ class ClaudeAgent:
         for extra in config.get("allowedTools", []):
             if extra not in tools:
                 tools.append(extra)
-        setting_sources = ["project"] if shell_enabled else None
+        # Always scope settings to the project. Leaving this None would make
+        # claude-agent-sdk inherit the host user's ~/.claude/ (MCP servers,
+        # skills, subagents, slash commands) which is unsafe and
+        # non-reproducible for a bot deployment.
+        setting_sources = ["project"]
 
         instructions = _load_instructions()
         db_path = os.getenv("SESSION_DB_PATH", ":memory:")

@@ -154,7 +154,10 @@ class TestFromDict:
     def test_shell_disabled_yields_no_allowed_tools(self, stub_instructions, fake_query):  # noqa: ARG002
         agent = ClaudeAgent.from_dict("t", {})
         assert agent._allowed_tools == []
-        assert agent._setting_sources is None
+
+    def test_setting_sources_always_scoped_to_project(self, stub_instructions, fake_query):  # noqa: ARG002
+        agent = ClaudeAgent.from_dict("t", {})
+        assert agent._setting_sources == ["project"]
 
     def test_shell_enabled_allows_read_only_plus_bash(self, stub_instructions, fake_query, monkeypatch):  # noqa: ARG002
         monkeypatch.setenv("SHELL_ENABLED", "1")
