@@ -4,7 +4,6 @@ import asyncio
 import logging
 import os
 from collections.abc import Hashable
-from pathlib import Path
 from typing import Any
 from typing import cast
 
@@ -13,9 +12,8 @@ from claude_agent_sdk import ResultMessage
 from claude_agent_sdk import query
 
 from .env import env_flag
+from .instructions import _load_instructions
 from .session_map import ClaudeSessionMap
-
-INSTRUCTIONS_FILE = Path("instructions.md")
 
 MAX_TURNS = 10
 DEFAULT_SHELL_TOOLS = ["Bash", "Read", "Glob", "Grep"]
@@ -36,15 +34,6 @@ class ClaudeAgentError(Exception):
         self.subtype = subtype
         self.session_id = session_id
 
-
-def _load_instructions() -> str:
-    try:
-        return INSTRUCTIONS_FILE.read_text(encoding="utf-8")
-    except FileNotFoundError as e:
-        raise FileNotFoundError(
-            f"Instructions file not found: {INSTRUCTIONS_FILE.resolve()}. "
-            "Create or mount instructions.md with the agent system prompt."
-        ) from e
 
 
 def _transform_mcp_servers(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:

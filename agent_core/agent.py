@@ -24,8 +24,7 @@ from agents.tracing import set_tracing_disabled
 from openai import AsyncOpenAI
 
 from .env import env_flag
-
-INSTRUCTIONS_FILE = Path("instructions.md")
+from .instructions import _load_instructions
 
 MAX_TURNS = 10
 MCP_SESSION_TIMEOUT_SECONDS = 30.0
@@ -50,20 +49,6 @@ def _turn_truncate(items: list[TResponseInputItem], max_turns: int) -> list[TRes
 
 set_tracing_disabled(True)
 
-
-def _load_instructions() -> str:
-    """Load agent instructions from ``instructions.md`` in the working directory.
-
-    Fails fast with a clear error if the file is missing, so misconfiguration
-    is caught immediately at startup.
-    """
-    try:
-        return INSTRUCTIONS_FILE.read_text(encoding="utf-8")
-    except FileNotFoundError as e:
-        raise FileNotFoundError(
-            f"Instructions file not found: {INSTRUCTIONS_FILE.resolve()}. "
-            "Create or mount instructions.md with the agent system prompt."
-        ) from e
 
 
 def _get_model(model_name: str, api_type: str) -> OpenAIResponsesModel | OpenAIChatCompletionsModel:
