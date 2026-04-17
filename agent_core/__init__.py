@@ -5,9 +5,10 @@ from typing import Any
 from .agent import OpenAIAgent
 from .base import AIAgent
 from .claude import ClaudeAgent
+from .claude import ClaudeAgentError
 from .env import env_flag
 
-__all__ = ["AIAgent", "ClaudeAgent", "OpenAIAgent", "build_agent", "env_flag"]
+__all__ = ["ClaudeAgent", "ClaudeAgentError", "OpenAIAgent", "build_agent", "env_flag"]
 
 
 def build_agent(name: str, config: dict[str, Any]) -> AIAgent:

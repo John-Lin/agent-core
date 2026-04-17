@@ -20,6 +20,22 @@ MAX_TURNS = 10
 DEFAULT_SHELL_TOOLS = ["Bash", "Read", "Glob", "Grep"]
 
 
+class ClaudeAgentError(Exception):
+    """Raised when claude-agent-sdk signals is_error=True on the ResultMessage.
+
+    Covers billing errors, rate limits, ``error_max_turns``,
+    ``error_max_budget_usd`` and anything else the SDK surfaces via
+    ``is_error``. The SDK-assigned session_id is exposed for diagnostics
+    but is *not* stored in the mapping, so a retry resumes the last
+    successful session instead of the failed one.
+    """
+
+    def __init__(self, message: str, subtype: str, session_id: str) -> None:
+        super().__init__(message)
+        self.subtype = subtype
+        self.session_id = session_id
+
+
 def _load_instructions() -> str:
     try:
         return INSTRUCTIONS_FILE.read_text(encoding="utf-8")
@@ -141,6 +157,12 @@ class ClaudeAgent:
             async for msg in query(prompt=message, options=options):
                 if isinstance(msg, ResultMessage):
                     captured_session_id = msg.session_id
+                    if msg.is_error:
+                        raise ClaudeAgentError(
+                            msg.result or "claude-agent-sdk returned is_error=True",
+                            subtype=msg.subtype,
+                            session_id=msg.session_id,
+                        )
                     if msg.result is not None:
                         final_text = msg.result
             if captured_session_id is not None:

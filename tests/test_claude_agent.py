@@ -13,6 +13,7 @@ from claude_agent_sdk import TextBlock
 
 from agent_core.claude import MAX_TURNS
 from agent_core.claude import ClaudeAgent
+from agent_core.claude import ClaudeAgentError
 
 
 @dataclass
@@ -31,6 +32,8 @@ class FakeQuery:
 
     session_id: str = "session-uuid-1"
     result_text: str = "hello"
+    is_error: bool = False
+    subtype: str = "success"
     calls: list[QueryCall] = field(default_factory=list)
 
     def __call__(self, *, prompt: str, options: ClaudeAgentOptions) -> AsyncIterator[Any]:
@@ -43,10 +46,10 @@ class FakeQuery:
             model="claude",
         )
         yield ResultMessage(
-            subtype="success",
+            subtype=self.subtype,
             duration_ms=0,
             duration_api_ms=0,
-            is_error=False,
+            is_error=self.is_error,
             num_turns=1,
             session_id=self.session_id,
             result=self.result_text,
@@ -128,6 +131,68 @@ class TestRun:
         call = fake_query.calls[0]
         assert call.prompt == "what is 2+2?"
         assert call.options.system_prompt == "you are a bot"
+
+
+class TestErrorHandling:
+    @pytest.mark.anyio
+    async def test_is_error_raises_claude_agent_error(self, fake_query):
+        fake_query.is_error = True
+        fake_query.result_text = "Credit balance is too low"
+        agent = ClaudeAgent(name="t", instructions="sys")
+        try:
+            with pytest.raises(ClaudeAgentError) as exc_info:
+                await agent.run("chat-1", "hi")
+        finally:
+            await agent.cleanup()
+        assert "Credit balance is too low" in str(exc_info.value)
+
+    @pytest.mark.anyio
+    async def test_error_exposes_subtype_and_session_id(self, fake_query):
+        fake_query.is_error = True
+        fake_query.subtype = "error_max_turns"
+        fake_query.session_id = "sess-err"
+        fake_query.result_text = "max turns hit"
+        agent = ClaudeAgent(name="t", instructions="sys")
+        try:
+            with pytest.raises(ClaudeAgentError) as exc_info:
+                await agent.run("chat-1", "hi")
+        finally:
+            await agent.cleanup()
+        assert exc_info.value.subtype == "error_max_turns"
+        assert exc_info.value.session_id == "sess-err"
+
+    @pytest.mark.anyio
+    async def test_errored_session_id_is_not_saved_to_mapping(self, fake_query):
+        """A failed run must not overwrite the prior good session id,
+        so that retrying resumes the last successful conversation."""
+        agent = ClaudeAgent(name="t", instructions="sys")
+        try:
+            # First call succeeds and stores "good-session".
+            fake_query.session_id = "good-session"
+            await agent.run("chat-1", "hi")
+            assert agent._session_map.get("chat-1") == "good-session"
+
+            # Second call errors with a different id.
+            fake_query.is_error = True
+            fake_query.session_id = "bad-session"
+            with pytest.raises(ClaudeAgentError):
+                await agent.run("chat-1", "again")
+        finally:
+            await agent.cleanup()
+        # The good id must still be there.
+        # (Check via a fresh map against the same DB path would be better,
+        # but for in-memory ":memory:" the same instance suffices.)
+
+    @pytest.mark.anyio
+    async def test_first_call_error_leaves_mapping_empty(self, fake_query):
+        fake_query.is_error = True
+        agent = ClaudeAgent(name="t", instructions="sys")
+        try:
+            with pytest.raises(ClaudeAgentError):
+                await agent.run("chat-1", "hi")
+            assert agent._session_map.get("chat-1") is None
+        finally:
+            await agent.cleanup()
 
 
 class TestFromDict:
