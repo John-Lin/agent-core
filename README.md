@@ -75,6 +75,21 @@ config = {
 }
 ```
 
+When the SDK returns an error (billing, rate limit, `error_max_turns`,
+etc.), `run()` raises `ClaudeAgentError` instead of returning an empty
+string. Catch it in your transport:
+
+```python
+from agent_core import ClaudeAgentError
+
+try:
+    reply = await agent.run(chat_id, user_text)
+except ClaudeAgentError as e:
+    # e.subtype: "error_max_turns" | "error_max_budget_usd" | ...
+    # e.session_id: SDK session that failed (not stored in mapping)
+    reply = f"Agent error: {e}"
+```
+
 Differences from the OpenAI provider:
 
 - Session history is stored on disk by `claude-agent-sdk` itself
