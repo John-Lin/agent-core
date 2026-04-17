@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from dataclasses import field
@@ -34,6 +35,7 @@ class FakeQuery:
     result_text: str = "hello"
     is_error: bool = False
     subtype: str = "success"
+    empty_stream: bool = False
     calls: list[QueryCall] = field(default_factory=list)
 
     def __call__(self, *, prompt: str, options: ClaudeAgentOptions) -> AsyncIterator[Any]:
@@ -41,6 +43,8 @@ class FakeQuery:
         return self._gen()
 
     async def _gen(self) -> AsyncIterator[Any]:
+        if self.empty_stream:
+            return
         yield AssistantMessage(
             content=[TextBlock(text=self.result_text)],
             model="claude",
@@ -177,11 +181,9 @@ class TestErrorHandling:
             fake_query.session_id = "bad-session"
             with pytest.raises(ClaudeAgentError):
                 await agent.run("chat-1", "again")
+            assert agent._session_map.get("chat-1") == "good-session"
         finally:
             await agent.cleanup()
-        # The good id must still be there.
-        # (Check via a fresh map against the same DB path would be better,
-        # but for in-memory ":memory:" the same instance suffices.)
 
     @pytest.mark.anyio
     async def test_first_call_error_leaves_mapping_empty(self, fake_query):
@@ -345,3 +347,72 @@ class TestConnectCleanup:
         # After cleanup, the mapping DB connection is closed; further ops raise.
         with pytest.raises(Exception):  # noqa: B017
             agent._session_map.get("chat-1")
+
+
+class TestMcpTransform:
+    def test_malformed_server_raises_value_error(self, fake_query):  # noqa: ARG002
+        """A config entry with neither 'url' nor 'command' must raise a clear error."""
+        from agent_core.claude import _transform_mcp_servers
+
+        with pytest.raises(ValueError, match="must have either"):
+            _transform_mcp_servers({"bad": {"enabled": True}})
+
+
+class TestEmptyStream:
+    @pytest.mark.anyio
+    async def test_empty_stream_returns_empty_string(self, fake_query, caplog):
+        """When SDK yields no ResultMessage, run() returns '' and logs a warning."""
+        import logging
+
+        fake_query.empty_stream = True
+        agent = ClaudeAgent(name="t", instructions="sys")
+        try:
+            with caplog.at_level(logging.WARNING, logger="agent_core.claude"):
+                result = await agent.run("chat-1", "hi")
+        finally:
+            await agent.cleanup()
+        assert result == ""
+        assert any("no ResultMessage" in r.message for r in caplog.records)
+
+    @pytest.mark.anyio
+    async def test_empty_stream_does_not_update_mapping(self, fake_query):
+        fake_query.empty_stream = True
+        agent = ClaudeAgent(name="t", instructions="sys")
+        try:
+            await agent.run("chat-1", "hi")
+            assert agent._session_map.get("chat-1") is None
+        finally:
+            await agent.cleanup()
+
+
+class TestConcurrency:
+    @pytest.mark.anyio
+    async def test_concurrent_runs_same_chat_id_are_serialized(self, fake_query):
+        """Two concurrent run() calls for the same chat_id must be serialized by
+        the per-chat lock, so the second call sees the session_id stored by the first."""
+        fake_query.session_id = "sess-shared"
+        agent = ClaudeAgent(name="t", instructions="sys")
+        try:
+            results = await asyncio.gather(
+                agent.run("chat-1", "msg1"),
+                agent.run("chat-1", "msg2"),
+            )
+        finally:
+            await agent.cleanup()
+        assert results == ["hello", "hello"]
+        # Whichever call ran second must have resumed the session from the first.
+        assert fake_query.calls[1].options.resume == "sess-shared"
+
+    @pytest.mark.anyio
+    async def test_concurrent_runs_different_chat_ids_run_independently(self, fake_query):
+        """Different chat_ids must not block each other."""
+        fake_query.session_id = "sess-x"
+        agent = ClaudeAgent(name="t", instructions="sys")
+        try:
+            results = await asyncio.gather(
+                agent.run("chat-A", "hi"),
+                agent.run("chat-B", "hi"),
+            )
+        finally:
+            await agent.cleanup()
+        assert results == ["hello", "hello"]

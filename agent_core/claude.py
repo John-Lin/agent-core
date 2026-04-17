@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from collections.abc import Hashable
 from pathlib import Path
@@ -62,13 +63,17 @@ def _transform_mcp_servers(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str
             if "headers" in srv:
                 entry["headers"] = srv["headers"]
             out[name] = entry
-        else:
+        elif "command" in srv:
             entry = {"type": "stdio", "command": srv["command"]}
             if "args" in srv:
                 entry["args"] = srv["args"]
             if srv.get("env") is not None:
                 entry["env"] = srv["env"]
             out[name] = entry
+        else:
+            raise ValueError(
+                f"MCP server {name!r} must have either 'url' (HTTP) or 'command' (stdio)"
+            )
     return out
 
 
@@ -142,15 +147,16 @@ class ClaudeAgent:
             resume_id = self._session_map.get(chat_id)
             options = ClaudeAgentOptions(
                 system_prompt=self._instructions,
+                # cast: SDK stub types mcp_servers as a union of specific TypedDicts,
+                # but the dict-literal form we build is accepted at runtime.
                 mcp_servers=cast("Any", self._mcp_servers),
                 allowed_tools=self._allowed_tools,
                 resume=resume_id,
                 max_turns=self._max_turns,
                 model=self._model_name,
-                setting_sources=cast(
-                    "list[Any] | None",
-                    self._setting_sources,
-                ),
+                # cast: SDK stub expects list[Literal["user","project","local"]]
+                # but plain list[str] is identical at runtime.
+                setting_sources=cast("list[Any] | None", self._setting_sources),
             )
             final_text = ""
             captured_session_id: str | None = None
@@ -165,7 +171,12 @@ class ClaudeAgent:
                         )
                     if msg.result is not None:
                         final_text = msg.result
-            if captured_session_id is not None:
+            if captured_session_id is None:
+                logging.warning(
+                    "claude-agent-sdk query() ended with no ResultMessage for chat_id=%r",
+                    chat_id,
+                )
+            else:
                 self._session_map.put(chat_id, captured_session_id)
             return final_text
 
