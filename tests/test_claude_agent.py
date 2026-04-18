@@ -216,9 +216,9 @@ class TestFromDict:
         agent = ClaudeAgent.from_dict("t", {})
         assert agent._max_turns is None
 
-    def test_no_allowed_tools_by_default(self, stub_instructions, fake_query):  # noqa: ARG002
+    def test_default_allowed_tools_are_read_only_builtins(self, stub_instructions, fake_query):  # noqa: ARG002
         agent = ClaudeAgent.from_dict("t", {})
-        assert agent._allowed_tools == []
+        assert agent._allowed_tools == ["Read", "Glob", "Grep"]
 
     def test_setting_sources_always_scoped_to_project(self, stub_instructions, fake_query):  # noqa: ARG002
         agent = ClaudeAgent.from_dict("t", {})
@@ -228,20 +228,21 @@ class TestFromDict:
         agent = ClaudeAgent(name="t", instructions="sys")
         assert agent._setting_sources == ["project"]
 
-    def test_config_allowed_tools_applied(self, stub_instructions, fake_query):  # noqa: ARG002
+    def test_config_allowed_tools_extend_defaults(self, stub_instructions, fake_query):  # noqa: ARG002
         agent = ClaudeAgent.from_dict(
             "t",
-            {"provider": {"type": "anthropic", "allowedTools": ["Bash", "Read", "WebFetch"]}},
+            {"provider": {"type": "anthropic", "allowedTools": ["Bash", "Write", "WebFetch"]}},
         )
-        assert agent._allowed_tools == ["Bash", "Read", "WebFetch"]
+        assert agent._allowed_tools == ["Read", "Glob", "Grep", "Bash", "Write", "WebFetch"]
         assert agent._setting_sources == ["project"]
 
-    def test_config_allowed_tools_deduplicated_preserving_order(self, stub_instructions, fake_query):  # noqa: ARG002
+    def test_config_allowed_tools_deduplicated_against_defaults(self, stub_instructions, fake_query):  # noqa: ARG002
+        # User-specified Read/Grep overlap the defaults but must not duplicate.
         agent = ClaudeAgent.from_dict(
             "t",
-            {"provider": {"type": "anthropic", "allowedTools": ["Bash", "Read", "Bash", "WebFetch", "Read"]}},
+            {"provider": {"type": "anthropic", "allowedTools": ["Read", "Bash", "Grep", "Bash"]}},
         )
-        assert agent._allowed_tools == ["Bash", "Read", "WebFetch"]
+        assert agent._allowed_tools == ["Read", "Glob", "Grep", "Bash"]
 
     def test_mcp_local_server_transformed(self, stub_instructions, fake_query):  # noqa: ARG002
         config = {

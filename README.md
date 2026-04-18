@@ -69,7 +69,7 @@ config = {
     "provider": {
         "type": "anthropic",
         "model": "claude-sonnet-4-6",  # optional, default: SDK's default
-        "allowedTools": ["Bash", "Read", "WebFetch"],  # optional; exact set of built-in tools to allow (duplicates dropped)
+        "allowedTools": ["Bash", "Write", "Edit"],  # optional; tools listed here are added on top of the read-only defaults
     },
     "mcp": {
         "my-local": {
@@ -101,9 +101,15 @@ Differences from the OpenAI provider:
   user's `~/.claude/` (personal MCP servers, skills, subagents, slash
   commands) is **never** inherited — otherwise a bot would silently
   run with whatever the server's user has configured.
-- There is no implicit shell toolset. List exactly the tools you want
-  in `config["provider"]["allowedTools"]` (e.g. `["Bash", "Read",
-  "Glob", "Grep", "WebFetch"]`).
+- Read-only built-ins (`Read`, `Glob`, `Grep`) are always on — these
+  are Anthropic's "no permission required" tools and carry no write or
+  exec risk. Any tool that can mutate files or run commands (`Write`,
+  `Edit`, `Bash`, `WebFetch`, …) must be listed explicitly in
+  `config["provider"]["allowedTools"]`. Tool names are case-sensitive
+  and validated by the SDK, not by us — an unrecognized name (e.g. a
+  typo like `"webSearch"`) is silently dropped. See Anthropic's
+  [tools reference](https://code.claude.com/docs/en/tools-reference)
+  for the canonical list and exact casing.
 - All tool execution happens locally in the CLI subprocess the SDK
   spawns — there is no hosted sandbox.
 
