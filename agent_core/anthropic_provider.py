@@ -11,12 +11,9 @@ from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk import ResultMessage
 from claude_agent_sdk import query
 
-from .env import env_flag
 from .errors import AgentError
 from .instructions import _load_instructions
 from .session_map import ClaudeSessionMap
-
-DEFAULT_SHELL_TOOLS = ["Bash", "Read", "Glob", "Grep"]
 
 
 def _transform_mcp_servers(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -82,11 +79,7 @@ class ClaudeAgent:
         mcp_servers = _transform_mcp_servers(config.get("mcpServers", {}))
 
         provider_cfg = config.get("provider") or {}
-        shell_enabled = env_flag("SHELL_ENABLED")
-        tools: list[str] = list(DEFAULT_SHELL_TOOLS) if shell_enabled else []
-        for extra in provider_cfg.get("allowedTools", []):
-            if extra not in tools:
-                tools.append(extra)
+        tools: list[str] = list(dict.fromkeys(provider_cfg.get("allowedTools", [])))
         # Always scope settings to the project. Leaving this None would make
         # claude-agent-sdk inherit the host user's ~/.claude/ (MCP servers,
         # skills, subagents, slash commands) which is unsafe and

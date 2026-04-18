@@ -9,13 +9,12 @@ from agent_core import build_agent
 
 @pytest.fixture
 def stub_instructions(monkeypatch):
-    monkeypatch.setattr("agent_core.agent._load_instructions", lambda: "stub instructions")
-    monkeypatch.setattr("agent_core.claude._load_instructions", lambda: "stub instructions")
+    monkeypatch.setattr("agent_core.openai_provider._load_instructions", lambda: "stub instructions")
+    monkeypatch.setattr("agent_core.anthropic_provider._load_instructions", lambda: "stub instructions")
 
 
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch):
-    monkeypatch.delenv("SHELL_ENABLED", raising=False)
     monkeypatch.delenv("SESSION_DB_PATH", raising=False)
 
 
@@ -25,7 +24,7 @@ def _mock_openai_model(monkeypatch):
 
     from agents.models.interface import Model
 
-    monkeypatch.setattr("agent_core.agent._get_model", lambda model_name, api_type: create_autospec(Model))
+    monkeypatch.setattr("agent_core.openai_provider._get_model", lambda model_name, api_type: create_autospec(Model))
 
 
 class TestBuildAgent:

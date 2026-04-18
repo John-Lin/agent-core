@@ -25,42 +25,40 @@ from agents.models.interface import Model
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from agents.models.openai_responses import OpenAIResponsesModel
 
-from agent_core.agent import HISTORY_TURNS_DEFAULT
-from agent_core.agent import MCP_SESSION_TIMEOUT_SECONDS
-from agent_core.agent import OpenAIAgent
-from agent_core.agent import _get_model
-from agent_core.agent import _parse_skill_description
-from agent_core.agent import _shell_executor
-from agent_core.agent import _turn_truncate
+from agent_core.openai_provider import HISTORY_TURNS_DEFAULT
+from agent_core.openai_provider import MCP_SESSION_TIMEOUT_SECONDS
+from agent_core.openai_provider import OpenAIAgent
+from agent_core.openai_provider import _get_model
+from agent_core.openai_provider import _parse_skill_description
+from agent_core.openai_provider import _shell_executor
+from agent_core.openai_provider import _turn_truncate
 
 
 @pytest.fixture
 def _stub_instructions(monkeypatch):
     """Stub out instructions.md loading for from_dict tests."""
-    monkeypatch.setattr("agent_core.agent._load_instructions", lambda: "stub instructions")
+    monkeypatch.setattr("agent_core.openai_provider._load_instructions", lambda: "stub instructions")
 
 
 @pytest.fixture(autouse=True)
 def _mock_model(monkeypatch):
-    """Prevent tests from constructing a real OpenAI client and isolate shell env vars."""
-    monkeypatch.setattr("agent_core.agent._get_model", lambda model_name, api_type: create_autospec(Model))
-    monkeypatch.delenv("SHELL_ENABLED", raising=False)
-    monkeypatch.delenv("SHELL_SKILLS_DIR", raising=False)
+    """Prevent tests from constructing a real OpenAI client."""
+    monkeypatch.setattr("agent_core.openai_provider._get_model", lambda model_name, api_type: create_autospec(Model))
 
 
 class TestGetModel:
     def test_returns_responses_model_by_default(self):
-        with patch("agent_core.agent.AsyncOpenAI", return_value=MagicMock()):
+        with patch("agent_core.openai_provider.AsyncOpenAI", return_value=MagicMock()):
             model = _get_model("gpt-4o", "responses")
         assert isinstance(model, OpenAIResponsesModel)
 
     def test_returns_responses_model_when_api_type_is_responses(self):
-        with patch("agent_core.agent.AsyncOpenAI", return_value=MagicMock()):
+        with patch("agent_core.openai_provider.AsyncOpenAI", return_value=MagicMock()):
             model = _get_model("gpt-4o", "responses")
         assert isinstance(model, OpenAIResponsesModel)
 
     def test_returns_chat_completions_model_when_api_type_is_chat_completions(self):
-        with patch("agent_core.agent.AsyncOpenAI", return_value=MagicMock()):
+        with patch("agent_core.openai_provider.AsyncOpenAI", return_value=MagicMock()):
             model = _get_model("gpt-4o", "chat_completions")
         assert isinstance(model, OpenAIChatCompletionsModel)
 
@@ -75,11 +73,11 @@ class TestFromDictModel:
             captured["api_type"] = api_type
             return create_autospec(Model)
 
-        with patch("agent_core.agent._get_model", side_effect=fake_get_model):
+        with patch("agent_core.openai_provider._get_model", side_effect=fake_get_model):
             OpenAIAgent.from_dict("test", {"mcpServers": {}})
 
-        from agent_core.agent import OPENAI_API_TYPE_DEFAULT
-        from agent_core.agent import OPENAI_MODEL_DEFAULT
+        from agent_core.openai_provider import OPENAI_API_TYPE_DEFAULT
+        from agent_core.openai_provider import OPENAI_MODEL_DEFAULT
 
         assert captured["model_name"] == OPENAI_MODEL_DEFAULT
         assert captured["api_type"] == OPENAI_API_TYPE_DEFAULT
@@ -92,7 +90,7 @@ class TestFromDictModel:
             captured["api_type"] = api_type
             return create_autospec(Model)
 
-        with patch("agent_core.agent._get_model", side_effect=fake_get_model):
+        with patch("agent_core.openai_provider._get_model", side_effect=fake_get_model):
             OpenAIAgent.from_dict(
                 "test",
                 {"mcpServers": {}, "provider": {"type": "openai", "model": "gpt-4o-mini"}},
@@ -108,7 +106,7 @@ class TestFromDictModel:
             captured["api_type"] = api_type
             return create_autospec(Model)
 
-        with patch("agent_core.agent._get_model", side_effect=fake_get_model):
+        with patch("agent_core.openai_provider._get_model", side_effect=fake_get_model):
             OpenAIAgent.from_dict(
                 "test",
                 {"mcpServers": {}, "provider": {"type": "openai", "apiType": "chat_completions"}},
@@ -387,7 +385,7 @@ class TestFromDictHistoryTurns:
             ]
         await session.add_items(history)
 
-        with patch("agent_core.agent.Runner.run", side_effect=fake_run):
+        with patch("agent_core.openai_provider.Runner.run", side_effect=fake_run):
             await agent.run(chat_id=1, message="new")
 
         sent = captured_inputs[0]
@@ -443,7 +441,7 @@ class TestRunWithSession:
         async def fake_run(ag, input, **kw):
             return self._make_run_result(input, reply="hello")
 
-        with patch("agent_core.agent.Runner.run", side_effect=fake_run):
+        with patch("agent_core.openai_provider.Runner.run", side_effect=fake_run):
             result = await agent.run(chat_id=1, message="hi")
 
         assert result == "hello"
@@ -457,7 +455,7 @@ class TestRunWithSession:
             input_sent.extend(input)
             return self._make_run_result(input, reply="pong")
 
-        with patch("agent_core.agent.Runner.run", side_effect=fake_run):
+        with patch("agent_core.openai_provider.Runner.run", side_effect=fake_run):
             await agent.run(chat_id=1, message="ping")
 
         session = agent._get_session(1)
@@ -472,7 +470,7 @@ class TestRunWithSession:
         async def fake_run(ag, input, **kw):
             return self._make_run_result(input, reply="reply")
 
-        with patch("agent_core.agent.Runner.run", side_effect=fake_run):
+        with patch("agent_core.openai_provider.Runner.run", side_effect=fake_run):
             await agent.run(chat_id=100, message="from 100")
             await agent.run(chat_id=200, message="from 200")
 
@@ -500,7 +498,7 @@ class TestRunWithSession:
             ]
         await session.add_items(history)
 
-        with patch("agent_core.agent.Runner.run", side_effect=fake_run):
+        with patch("agent_core.openai_provider.Runner.run", side_effect=fake_run):
             await agent.run(chat_id=1, message="new")
 
         sent = captured_inputs[0]
@@ -540,7 +538,7 @@ class TestRunErrorMapping:
         async def boom(ag, input, **kw):
             raise exc
 
-        with patch("agent_core.agent.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
+        with patch("agent_core.openai_provider.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
             await agent.run(chat_id=1, message="hi")
         assert exc_info.value.subtype == expected_subtype
         assert exc_info.value.provider == "openai"
@@ -568,7 +566,7 @@ class TestRunErrorMapping:
         async def boom(ag, input, **kw):
             raise self._api_status_exc(exc_cls)
 
-        with patch("agent_core.agent.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
+        with patch("agent_core.openai_provider.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
             await agent.run(chat_id=1, message="hi")
         assert exc_info.value.subtype == expected_subtype
         assert exc_info.value.provider == "openai"
@@ -584,7 +582,7 @@ class TestRunErrorMapping:
         async def boom(ag, input, **kw):
             raise openai.APITimeoutError(request=MagicMock())
 
-        with patch("agent_core.agent.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
+        with patch("agent_core.openai_provider.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
             await agent.run(chat_id=1, message="hi")
         assert exc_info.value.subtype == "timeout"
         assert exc_info.value.provider == "openai"
@@ -600,7 +598,7 @@ class TestRunErrorMapping:
         async def boom(ag, input, **kw):
             raise openai.APIConnectionError(request=MagicMock())
 
-        with patch("agent_core.agent.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
+        with patch("agent_core.openai_provider.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
             await agent.run(chat_id=1, message="hi")
         assert exc_info.value.subtype == "connection"
         assert exc_info.value.provider == "openai"
@@ -612,7 +610,7 @@ class TestRunErrorMapping:
         async def boom(ag, input, **kw):
             raise RuntimeError("???")
 
-        with patch("agent_core.agent.Runner.run", side_effect=boom), pytest.raises(RuntimeError):
+        with patch("agent_core.openai_provider.Runner.run", side_effect=boom), pytest.raises(RuntimeError):
             await agent.run(chat_id=1, message="hi")
 
 
@@ -643,15 +641,11 @@ class TestShellToolConfiguration:
     def _get_shell_tools(self, agent: OpenAIAgent) -> list[ShellTool]:
         return [t for t in agent.agent.tools if isinstance(t, ShellTool)]
 
-    def _configure_env(self, monkeypatch, *, enabled: bool, skills_dir: Path | None = None) -> None:
-        if enabled:
-            monkeypatch.setenv("SHELL_ENABLED", "1")
-        else:
-            monkeypatch.delenv("SHELL_ENABLED", raising=False)
+    def _config(self, *, enabled: bool, skills_dir: Path | None = None) -> dict:
+        shell: dict = {"enabled": enabled}
         if skills_dir is not None:
-            monkeypatch.setenv("SHELL_SKILLS_DIR", str(skills_dir))
-        else:
-            monkeypatch.delenv("SHELL_SKILLS_DIR", raising=False)
+            shell["skillsDir"] = str(skills_dir)
+        return {"mcpServers": {}, "provider": {"type": "openai", "shell": shell}}
 
     def _make_skill(self, parent: Path, name: str, description: str = "desc") -> Path:
         skill_dir = parent / name
@@ -659,40 +653,46 @@ class TestShellToolConfiguration:
         (skill_dir / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {description}\n---\n")
         return skill_dir
 
-    def test_disabled_by_default(self, tmp_path, monkeypatch):
-        """SHELL_ENABLED unset means no ShellTool, even if SHELL_SKILLS_DIR is set."""
+    def test_disabled_by_default(self, tmp_path):
+        """enabled=false means no ShellTool, even if skillsDir is set."""
         self._make_skill(tmp_path, "my-skill")
-        self._configure_env(monkeypatch, enabled=False, skills_dir=tmp_path)
 
+        agent = OpenAIAgent.from_dict("test", self._config(enabled=False, skills_dir=tmp_path))
+
+        assert self._get_shell_tools(agent) == []
+
+    def test_missing_shell_config_means_disabled(self):
         agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
 
         assert self._get_shell_tools(agent) == []
 
-    def test_orphaned_skills_dir_without_shell_enabled_warns(self, tmp_path, monkeypatch, caplog):
-        self._configure_env(monkeypatch, enabled=False, skills_dir=tmp_path)
+    @pytest.mark.parametrize("bad_value", ["true", "false", 1, 0, None])
+    def test_non_bool_enabled_rejected(self, bad_value):
+        config = {"mcpServers": {}, "provider": {"type": "openai", "shell": {"enabled": bad_value}}}
+        with pytest.raises(ValueError, match="provider.shell.enabled must be a bool"):
+            OpenAIAgent.from_dict("test", config)
 
+    def test_orphaned_skills_dir_without_shell_enabled_warns(self, tmp_path, caplog):
         with caplog.at_level("WARNING", logger="root"):
-            agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+            agent = OpenAIAgent.from_dict("test", self._config(enabled=False, skills_dir=tmp_path))
 
         assert self._get_shell_tools(agent) == []
         assert any(
-            "SHELL_SKILLS_DIR" in record.message and "SHELL_ENABLED" in record.message for record in caplog.records
+            "provider.shell.skillsDir" in record.message and "provider.shell.enabled" in record.message
+            for record in caplog.records
         )
 
-    def test_shell_enabled_without_skills_dir_adds_bare_shell(self, tmp_path, monkeypatch):
-        self._configure_env(monkeypatch, enabled=True, skills_dir=None)
-
-        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+    def test_shell_enabled_without_skills_dir_adds_bare_shell(self):
+        agent = OpenAIAgent.from_dict("test", self._config(enabled=True, skills_dir=None))
 
         shell_tools = self._get_shell_tools(agent)
         assert len(shell_tools) == 1
         assert shell_tools[0].environment == {"type": "local"}
 
-    def test_shell_enabled_with_skills_dir_mounts_skills(self, tmp_path, monkeypatch):
+    def test_shell_enabled_with_skills_dir_mounts_skills(self, tmp_path):
         skill_dir = self._make_skill(tmp_path, "my-skill", description="A test skill")
-        self._configure_env(monkeypatch, enabled=True, skills_dir=tmp_path)
 
-        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+        agent = OpenAIAgent.from_dict("test", self._config(enabled=True, skills_dir=tmp_path))
 
         shell_tool = self._get_shell_tools(agent)[0]
         env = cast(dict[str, Any], shell_tool.environment)
@@ -701,57 +701,54 @@ class TestShellToolConfiguration:
         assert skill["description"] == "A test skill"
         assert skill["path"] == str(skill_dir)
 
-    def test_skills_dir_missing_falls_back_to_bare_shell_with_warning(self, tmp_path, monkeypatch, caplog):
-        self._configure_env(monkeypatch, enabled=True, skills_dir=tmp_path / "nonexistent")
-
+    def test_skills_dir_missing_falls_back_to_bare_shell_with_warning(self, tmp_path, caplog):
         with caplog.at_level("WARNING", logger="root"):
-            agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+            agent = OpenAIAgent.from_dict(
+                "test", self._config(enabled=True, skills_dir=tmp_path / "nonexistent")
+            )
 
         shell_tools = self._get_shell_tools(agent)
         assert len(shell_tools) == 1
         assert shell_tools[0].environment == {"type": "local"}
         assert any("yielded no skills" in record.message for record in caplog.records)
 
-    def test_multiple_skills_all_mounted(self, tmp_path, monkeypatch):
+    def test_multiple_skills_all_mounted(self, tmp_path):
         self._make_skill(tmp_path, "skill-a")
         self._make_skill(tmp_path, "skill-b")
-        self._configure_env(monkeypatch, enabled=True, skills_dir=tmp_path)
 
-        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+        agent = OpenAIAgent.from_dict("test", self._config(enabled=True, skills_dir=tmp_path))
 
         shell_tool = self._get_shell_tools(agent)[0]
         assert len(cast(dict[str, Any], shell_tool.environment)["skills"]) == 2
 
-    def test_directory_without_skill_md_is_skipped(self, tmp_path, monkeypatch):
+    def test_directory_without_skill_md_is_skipped(self, tmp_path):
         (tmp_path / "not-a-skill").mkdir()
         self._make_skill(tmp_path, "real-skill")
-        self._configure_env(monkeypatch, enabled=True, skills_dir=tmp_path)
 
-        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+        agent = OpenAIAgent.from_dict("test", self._config(enabled=True, skills_dir=tmp_path))
 
         shell_tool = self._get_shell_tools(agent)[0]
         skills = cast(dict[str, Any], shell_tool.environment)["skills"]
         assert len(skills) == 1
         assert skills[0]["name"] == "real-skill"
 
-    def test_mcp_servers_and_shell_skills_coexist(self, tmp_path, monkeypatch):
+    def test_mcp_servers_and_shell_skills_coexist(self, tmp_path):
         self._make_skill(tmp_path, "s")
-        self._configure_env(monkeypatch, enabled=True, skills_dir=tmp_path)
 
-        config = {"mcpServers": {"my-mcp": {"command": "uvx", "args": ["something"]}}}
+        config = self._config(enabled=True, skills_dir=tmp_path)
+        config["mcpServers"] = {"my-mcp": {"command": "uvx", "args": ["something"]}}
         agent = OpenAIAgent.from_dict("test", config)
 
         assert len(agent.agent.mcp_servers) == 1
         assert len(self._get_shell_tools(agent)) == 1
 
-    def test_unreadable_utf8_skill_file_is_skipped(self, tmp_path, monkeypatch):
+    def test_unreadable_utf8_skill_file_is_skipped(self, tmp_path):
         bad = tmp_path / "bad-skill"
         bad.mkdir()
         (bad / "SKILL.md").write_bytes(b"\xff\xfe\x00\x00")
         self._make_skill(tmp_path, "good-skill", description="good")
-        self._configure_env(monkeypatch, enabled=True, skills_dir=tmp_path)
 
-        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+        agent = OpenAIAgent.from_dict("test", self._config(enabled=True, skills_dir=tmp_path))
 
         shell_tool = self._get_shell_tools(agent)[0]
         skills = cast(dict[str, Any], shell_tool.environment)["skills"]
@@ -764,7 +761,6 @@ class TestShellToolConfiguration:
         bad_file = bad / "SKILL.md"
         bad_file.write_text("---\nname: bad\ndescription: bad\n---\n")
         self._make_skill(tmp_path, "good-skill", description="good")
-        self._configure_env(monkeypatch, enabled=True, skills_dir=tmp_path)
 
         original_read_text = Path.read_text
 
@@ -775,7 +771,7 @@ class TestShellToolConfiguration:
 
         monkeypatch.setattr(Path, "read_text", _read_text)
 
-        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+        agent = OpenAIAgent.from_dict("test", self._config(enabled=True, skills_dir=tmp_path))
 
         shell_tool = self._get_shell_tools(agent)[0]
         skills = cast(dict[str, Any], shell_tool.environment)["skills"]

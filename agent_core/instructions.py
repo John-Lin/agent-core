@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-INSTRUCTIONS_FILE = Path("instructions.md")
+INSTRUCTIONS_FILE = Path(os.getenv("AGENT_INSTRUCTIONS_PATH", "instructions.md"))
 
 
 def _load_instructions() -> str:
-    """Load agent instructions from ``instructions.md`` in the working directory.
+    """Load agent instructions from the instructions file.
+
+    Path resolution order:
+      1. ``AGENT_INSTRUCTIONS_PATH`` environment variable, if set.
+      2. ``instructions.md`` in the process working directory.
 
     Fails fast with a clear error if the file is missing, so misconfiguration
     is caught immediately at startup.
