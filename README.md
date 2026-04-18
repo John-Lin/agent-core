@@ -80,21 +80,6 @@ config = {
 }
 ```
 
-When the SDK returns an error (billing, rate limit, `error_max_turns`,
-etc.), `run()` raises `ClaudeAgentError` instead of returning an empty
-string. Catch it in your transport:
-
-```python
-from agent_core import ClaudeAgentError
-
-try:
-    reply = await agent.run(chat_id, user_text)
-except ClaudeAgentError as e:
-    # e.subtype: "error_max_turns" | "error_max_budget_usd" | ...
-    # e.session_id: SDK session that failed (not stored in mapping)
-    reply = f"Agent error: {e}"
-```
-
 Differences from the OpenAI provider:
 
 - Session history is stored on disk by `claude-agent-sdk` itself
@@ -115,6 +100,39 @@ Differences from the OpenAI provider:
   `config["provider"]["allowedTools"]`.
 - All tool execution happens locally in the CLI subprocess the SDK
   spawns — there is no hosted sandbox.
+
+## Error handling
+
+Both providers raise a common `AgentError` when the underlying SDK
+reports a failure (billing, rate limits, max turns, guardrails, …).
+Catch it in your transport and branch on `subtype`:
+
+```python
+from agent_core import AgentError
+
+try:
+    reply = await agent.run(chat_id, user_text)
+except AgentError as e:
+    # e.provider:   "openai" | "anthropic"
+    # e.subtype:    normalized tag (see table below)
+    # e.session_id: Anthropic-only; None for OpenAI
+    reply = f"Agent error ({e.subtype}): {e}"
+```
+
+| subtype | OpenAI source | Anthropic source |
+|---|---|---|
+| `error_max_turns` | `MaxTurnsExceeded` | SDK `error_max_turns` |
+| `error_max_budget_usd` | — | SDK `error_max_budget_usd` |
+| `rate_limit` | `openai.RateLimitError` | — (surfaces via `is_error`) |
+| `auth` | `openai.AuthenticationError` | — |
+| `bad_request` | `openai.BadRequestError` | — |
+| `api_status` | other `openai.APIStatusError` | — |
+| `model_behavior` | `agents.ModelBehaviorError` | — |
+| `guardrail` | Input/Output guardrail tripwires | — |
+| *(passthrough)* | — | any other SDK `subtype` |
+
+Unmapped exceptions (e.g. `RuntimeError`) propagate unchanged — the
+wrapper only normalizes known provider failures.
 
 ## Environment
 

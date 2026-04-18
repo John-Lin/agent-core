@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from typing import cast
 
+import openai
 from agents import Agent
 from agents import Runner
 from agents import ShellCommandRequest
@@ -16,6 +17,10 @@ from agents import ShellToolLocalEnvironment
 from agents import ShellToolLocalSkill
 from agents import SQLiteSession
 from agents import TResponseInputItem
+from agents.exceptions import InputGuardrailTripwireTriggered
+from agents.exceptions import MaxTurnsExceeded
+from agents.exceptions import ModelBehaviorError
+from agents.exceptions import OutputGuardrailTripwireTriggered
 from agents.mcp import MCPServerStdio
 from agents.mcp import MCPServerStreamableHttp
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
@@ -24,6 +29,7 @@ from agents.tracing import set_tracing_disabled
 from openai import AsyncOpenAI
 
 from .env import env_flag
+from .errors import AgentError
 from .instructions import _load_instructions
 
 HISTORY_TURNS_DEFAULT = 10
@@ -297,7 +303,22 @@ class OpenAIAgent:
             all_items = await session.get_items()
             truncated = _turn_truncate(all_items, self.history_turns)
             input_items = truncated + [cast(TResponseInputItem, {"role": "user", "content": message})]
-            result = await Runner.run(self.agent, input=input_items)
+            try:
+                result = await Runner.run(self.agent, input=input_items)
+            except MaxTurnsExceeded as e:
+                raise AgentError(str(e), subtype="error_max_turns", provider="openai") from e
+            except (InputGuardrailTripwireTriggered, OutputGuardrailTripwireTriggered) as e:
+                raise AgentError(str(e), subtype="guardrail", provider="openai") from e
+            except ModelBehaviorError as e:
+                raise AgentError(str(e), subtype="model_behavior", provider="openai") from e
+            except openai.RateLimitError as e:
+                raise AgentError(str(e), subtype="rate_limit", provider="openai") from e
+            except openai.AuthenticationError as e:
+                raise AgentError(str(e), subtype="auth", provider="openai") from e
+            except openai.BadRequestError as e:
+                raise AgentError(str(e), subtype="bad_request", provider="openai") from e
+            except openai.APIStatusError as e:
+                raise AgentError(str(e), subtype="api_status", provider="openai") from e
             new_items = result.to_input_list()[len(truncated) :]
             await session.add_items(new_items)
             return str(result.final_output)
