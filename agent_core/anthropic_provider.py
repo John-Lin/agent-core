@@ -15,6 +15,13 @@ from .errors import AgentError
 from .instructions import _load_instructions
 from .session_map import ClaudeSessionMap
 
+# Read-only built-ins that are always exposed to the agent. They map to
+# Anthropic's "No permission required" tools and pose no write or exec risk,
+# so they form a safe baseline regardless of provider.allowedTools. Any tool
+# that can mutate files or run commands (Write, Edit, Bash, …) must be
+# listed explicitly by the caller.
+DEFAULT_ALLOWED_TOOLS = ["Read", "Glob", "Grep"]
+
 
 def _transform_mcp_servers(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Convert the shared opencode-style ``mcp`` config to claude-agent-sdk format.
@@ -85,7 +92,9 @@ class ClaudeAgent:
         mcp_servers = _transform_mcp_servers(config.get("mcp", {}))
 
         provider_cfg = config.get("provider") or {}
-        tools: list[str] = list(dict.fromkeys(provider_cfg.get("allowedTools", [])))
+        tools: list[str] = list(
+            dict.fromkeys(DEFAULT_ALLOWED_TOOLS + list(provider_cfg.get("allowedTools", [])))
+        )
         # Always scope settings to the project. Leaving this None would make
         # claude-agent-sdk inherit the host user's ~/.claude/ (MCP servers,
         # skills, subagents, slash commands) which is unsafe and
