@@ -131,6 +131,9 @@ except AgentError as e:
 | `api_status` | other `openai.APIStatusError` | — |
 | `model_behavior` | `agents.ModelBehaviorError` | — |
 | `guardrail` | Input/Output guardrail tripwires | — |
+| `tool_guardrail` | Tool-level guardrail tripwires | — |
+| `tool_timeout` | `agents.ToolTimeoutError` | — |
+| `mcp_cancelled` | `agents.MCPToolCancellationError` | — |
 | *(passthrough)* | — | any other SDK `subtype` |
 
 Unmapped exceptions (e.g. `RuntimeError`) propagate unchanged — the

@@ -19,8 +19,12 @@ from agents import SQLiteSession
 from agents import TResponseInputItem
 from agents.exceptions import InputGuardrailTripwireTriggered
 from agents.exceptions import MaxTurnsExceeded
+from agents.exceptions import MCPToolCancellationError
 from agents.exceptions import ModelBehaviorError
 from agents.exceptions import OutputGuardrailTripwireTriggered
+from agents.exceptions import ToolInputGuardrailTripwireTriggered
+from agents.exceptions import ToolOutputGuardrailTripwireTriggered
+from agents.exceptions import ToolTimeoutError
 from agents.mcp import MCPServerStdio
 from agents.mcp import MCPServerStreamableHttp
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
@@ -54,6 +58,35 @@ def _turn_truncate(items: list[TResponseInputItem], max_turns: int) -> list[TRes
 
 
 set_tracing_disabled(True)
+
+
+# Ordered specific-before-general. The openai.APIStatusError entry is the
+# HTTP-status catch-all: RateLimit/Auth/BadRequest hit earlier and keep
+# their own subtype; anything else (InternalServerError, NotFoundError, …)
+# collapses to "api_status". APITimeoutError must come before
+# APIConnectionError because the former is a subclass of the latter.
+_RUN_ERROR_SUBTYPES: tuple[tuple[type[BaseException] | tuple[type[BaseException], ...], str], ...] = (
+    (MaxTurnsExceeded, "error_max_turns"),
+    ((InputGuardrailTripwireTriggered, OutputGuardrailTripwireTriggered), "guardrail"),
+    ((ToolInputGuardrailTripwireTriggered, ToolOutputGuardrailTripwireTriggered), "tool_guardrail"),
+    (ToolTimeoutError, "tool_timeout"),
+    (MCPToolCancellationError, "mcp_cancelled"),
+    (ModelBehaviorError, "model_behavior"),
+    (openai.RateLimitError, "rate_limit"),
+    (openai.AuthenticationError, "auth"),
+    (openai.BadRequestError, "bad_request"),
+    (openai.APITimeoutError, "timeout"),
+    (openai.APIConnectionError, "connection"),
+    (openai.APIStatusError, "api_status"),
+)
+
+
+def _classify_run_error(exc: BaseException) -> str | None:
+    """Return the AgentError subtype for a known Runner.run failure, else None."""
+    for exc_types, subtype in _RUN_ERROR_SUBTYPES:
+        if isinstance(exc, exc_types):
+            return subtype
+    return None
 
 
 def _get_model(model_name: str, api_type: str) -> OpenAIResponsesModel | OpenAIChatCompletionsModel:
@@ -305,27 +338,11 @@ class OpenAIAgent:
             input_items = truncated + [cast(TResponseInputItem, {"role": "user", "content": message})]
             try:
                 result = await Runner.run(self.agent, input=input_items)
-            except MaxTurnsExceeded as e:
-                raise AgentError(str(e), subtype="error_max_turns", provider="openai") from e
-            except (InputGuardrailTripwireTriggered, OutputGuardrailTripwireTriggered) as e:
-                raise AgentError(str(e), subtype="guardrail", provider="openai") from e
-            except ModelBehaviorError as e:
-                raise AgentError(str(e), subtype="model_behavior", provider="openai") from e
-            except openai.RateLimitError as e:
-                raise AgentError(str(e), subtype="rate_limit", provider="openai") from e
-            except openai.AuthenticationError as e:
-                raise AgentError(str(e), subtype="auth", provider="openai") from e
-            except openai.BadRequestError as e:
-                raise AgentError(str(e), subtype="bad_request", provider="openai") from e
-            except openai.APITimeoutError as e:
-                raise AgentError(str(e), subtype="timeout", provider="openai") from e
-            except openai.APIConnectionError as e:
-                raise AgentError(str(e), subtype="connection", provider="openai") from e
-            # Catch-all for remaining HTTP-status errors (InternalServerError,
-            # PermissionDeniedError, NotFoundError, ...). Specific ones above
-            # keep their own subtype; anything else collapses to "api_status".
-            except openai.APIStatusError as e:
-                raise AgentError(str(e), subtype="api_status", provider="openai") from e
+            except Exception as e:
+                subtype = _classify_run_error(e)
+                if subtype is None:
+                    raise
+                raise AgentError(str(e), subtype=subtype, provider="openai") from e
             new_items = result.to_input_list()[len(truncated) :]
             await session.add_items(new_items)
             return str(result.final_output)

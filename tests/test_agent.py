@@ -13,8 +13,12 @@ from agents import SQLiteSession
 from agents import TResponseInputItem
 from agents.exceptions import InputGuardrailTripwireTriggered
 from agents.exceptions import MaxTurnsExceeded
+from agents.exceptions import MCPToolCancellationError
 from agents.exceptions import ModelBehaviorError
 from agents.exceptions import OutputGuardrailTripwireTriggered
+from agents.exceptions import ToolInputGuardrailTripwireTriggered
+from agents.exceptions import ToolOutputGuardrailTripwireTriggered
+from agents.exceptions import ToolTimeoutError
 from agents.mcp import MCPServerStdio
 from agents.mcp import MCPServerStreamableHttp
 from agents.models.interface import Model
@@ -522,6 +526,10 @@ class TestRunErrorMapping:
             (ModelBehaviorError("bad"), "model_behavior"),
             (InputGuardrailTripwireTriggered(MagicMock()), "guardrail"),
             (OutputGuardrailTripwireTriggered(MagicMock()), "guardrail"),
+            (ToolInputGuardrailTripwireTriggered(MagicMock(), MagicMock()), "tool_guardrail"),
+            (ToolOutputGuardrailTripwireTriggered(MagicMock(), MagicMock()), "tool_guardrail"),
+            (ToolTimeoutError("my_tool", 30.0), "tool_timeout"),
+            (MCPToolCancellationError("cancelled"), "mcp_cancelled"),
         ],
     )
     async def test_agents_exceptions_mapped(self, exc, expected_subtype):
