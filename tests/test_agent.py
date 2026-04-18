@@ -11,6 +11,14 @@ import pytest
 from agents import ShellTool
 from agents import SQLiteSession
 from agents import TResponseInputItem
+from agents.exceptions import InputGuardrailTripwireTriggered
+from agents.exceptions import MaxTurnsExceeded
+from agents.exceptions import MCPToolCancellationError
+from agents.exceptions import ModelBehaviorError
+from agents.exceptions import OutputGuardrailTripwireTriggered
+from agents.exceptions import ToolInputGuardrailTripwireTriggered
+from agents.exceptions import ToolOutputGuardrailTripwireTriggered
+from agents.exceptions import ToolTimeoutError
 from agents.mcp import MCPServerStdio
 from agents.mcp import MCPServerStreamableHttp
 from agents.models.interface import Model
@@ -498,6 +506,114 @@ class TestRunWithSession:
         sent = captured_inputs[0]
         user_msgs = [m for m in sent if m.get("role") == "user" and m["content"] != "new"]
         assert len(user_msgs) == HISTORY_TURNS_DEFAULT
+
+
+class TestRunErrorMapping:
+    """Runner.run failures are mapped to AgentError(subtype=..., provider="openai")."""
+
+    @staticmethod
+    def _api_status_exc(cls: type, message: str = "err"):
+        """Build an openai APIStatusError subclass instance with the required kwargs."""
+        response = MagicMock()
+        response.request = MagicMock()
+        return cls(message, response=response, body=None)
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("exc", "expected_subtype"),
+        [
+            (MaxTurnsExceeded("turns"), "error_max_turns"),
+            (ModelBehaviorError("bad"), "model_behavior"),
+            (InputGuardrailTripwireTriggered(MagicMock()), "guardrail"),
+            (OutputGuardrailTripwireTriggered(MagicMock()), "guardrail"),
+            (ToolInputGuardrailTripwireTriggered(MagicMock(), MagicMock()), "tool_guardrail"),
+            (ToolOutputGuardrailTripwireTriggered(MagicMock(), MagicMock()), "tool_guardrail"),
+            (ToolTimeoutError("my_tool", 30.0), "tool_timeout"),
+            (MCPToolCancellationError("cancelled"), "mcp_cancelled"),
+        ],
+    )
+    async def test_agents_exceptions_mapped(self, exc, expected_subtype):
+        from agent_core import AgentError
+
+        agent = OpenAIAgent(name="t", instructions="sys")
+
+        async def boom(ag, input, **kw):
+            raise exc
+
+        with patch("agent_core.agent.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
+            await agent.run(chat_id=1, message="hi")
+        assert exc_info.value.subtype == expected_subtype
+        assert exc_info.value.provider == "openai"
+        assert exc_info.value.session_id is None
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("exc_name", "expected_subtype"),
+        [
+            ("RateLimitError", "rate_limit"),
+            ("AuthenticationError", "auth"),
+            ("BadRequestError", "bad_request"),
+            # Fallback: any other APIStatusError subclass collapses to api_status.
+            ("InternalServerError", "api_status"),
+        ],
+    )
+    async def test_openai_status_errors_mapped(self, exc_name, expected_subtype):
+        import openai
+
+        from agent_core import AgentError
+
+        exc_cls = getattr(openai, exc_name)
+        agent = OpenAIAgent(name="t", instructions="sys")
+
+        async def boom(ag, input, **kw):
+            raise self._api_status_exc(exc_cls)
+
+        with patch("agent_core.agent.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
+            await agent.run(chat_id=1, message="hi")
+        assert exc_info.value.subtype == expected_subtype
+        assert exc_info.value.provider == "openai"
+
+    @pytest.mark.anyio
+    async def test_api_timeout_mapped_to_timeout(self):
+        import openai
+
+        from agent_core import AgentError
+
+        agent = OpenAIAgent(name="t", instructions="sys")
+
+        async def boom(ag, input, **kw):
+            raise openai.APITimeoutError(request=MagicMock())
+
+        with patch("agent_core.agent.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
+            await agent.run(chat_id=1, message="hi")
+        assert exc_info.value.subtype == "timeout"
+        assert exc_info.value.provider == "openai"
+
+    @pytest.mark.anyio
+    async def test_api_connection_mapped_to_connection(self):
+        import openai
+
+        from agent_core import AgentError
+
+        agent = OpenAIAgent(name="t", instructions="sys")
+
+        async def boom(ag, input, **kw):
+            raise openai.APIConnectionError(request=MagicMock())
+
+        with patch("agent_core.agent.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
+            await agent.run(chat_id=1, message="hi")
+        assert exc_info.value.subtype == "connection"
+        assert exc_info.value.provider == "openai"
+
+    @pytest.mark.anyio
+    async def test_unknown_exception_propagates_unwrapped(self):
+        agent = OpenAIAgent(name="t", instructions="sys")
+
+        async def boom(ag, input, **kw):
+            raise RuntimeError("???")
+
+        with patch("agent_core.agent.Runner.run", side_effect=boom), pytest.raises(RuntimeError):
+            await agent.run(chat_id=1, message="hi")
 
 
 class TestCleanupClosesSessions:

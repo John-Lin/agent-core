@@ -12,26 +12,11 @@ from claude_agent_sdk import ResultMessage
 from claude_agent_sdk import query
 
 from .env import env_flag
+from .errors import AgentError
 from .instructions import _load_instructions
 from .session_map import ClaudeSessionMap
 
 DEFAULT_SHELL_TOOLS = ["Bash", "Read", "Glob", "Grep"]
-
-
-class ClaudeAgentError(Exception):
-    """Raised when claude-agent-sdk signals is_error=True on the ResultMessage.
-
-    Covers billing errors, rate limits, ``error_max_turns``,
-    ``error_max_budget_usd`` and anything else the SDK surfaces via
-    ``is_error``. The SDK-assigned session_id is exposed for diagnostics
-    but is *not* stored in the mapping, so a retry resumes the last
-    successful session instead of the failed one.
-    """
-
-    def __init__(self, message: str, subtype: str, session_id: str) -> None:
-        super().__init__(message)
-        self.subtype = subtype
-        self.session_id = session_id
 
 
 def _transform_mcp_servers(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -148,9 +133,10 @@ class ClaudeAgent:
                 if isinstance(msg, ResultMessage):
                     captured_session_id = msg.session_id
                     if msg.is_error:
-                        raise ClaudeAgentError(
+                        raise AgentError(
                             msg.result or "claude-agent-sdk returned is_error=True",
                             subtype=msg.subtype,
+                            provider="anthropic",
                             session_id=msg.session_id,
                         )
                     if msg.result is not None:

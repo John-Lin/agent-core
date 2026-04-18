@@ -12,8 +12,8 @@ from claude_agent_sdk import ClaudeAgentOptions
 from claude_agent_sdk import ResultMessage
 from claude_agent_sdk import TextBlock
 
+from agent_core import AgentError
 from agent_core.claude import ClaudeAgent
-from agent_core.claude import ClaudeAgentError
 
 
 @dataclass
@@ -138,12 +138,12 @@ class TestRun:
 
 class TestErrorHandling:
     @pytest.mark.anyio
-    async def test_is_error_raises_claude_agent_error(self, fake_query):
+    async def test_is_error_raises_agent_error(self, fake_query):
         fake_query.is_error = True
         fake_query.result_text = "Credit balance is too low"
         agent = ClaudeAgent(name="t", instructions="sys")
         try:
-            with pytest.raises(ClaudeAgentError) as exc_info:
+            with pytest.raises(AgentError) as exc_info:
                 await agent.run("chat-1", "hi")
         finally:
             await agent.cleanup()
@@ -157,12 +157,13 @@ class TestErrorHandling:
         fake_query.result_text = "max turns hit"
         agent = ClaudeAgent(name="t", instructions="sys")
         try:
-            with pytest.raises(ClaudeAgentError) as exc_info:
+            with pytest.raises(AgentError) as exc_info:
                 await agent.run("chat-1", "hi")
         finally:
             await agent.cleanup()
         assert exc_info.value.subtype == "error_max_turns"
         assert exc_info.value.session_id == "sess-err"
+        assert exc_info.value.provider == "anthropic"
 
     @pytest.mark.anyio
     async def test_errored_session_id_is_not_saved_to_mapping(self, fake_query):
@@ -178,7 +179,7 @@ class TestErrorHandling:
             # Second call errors with a different id.
             fake_query.is_error = True
             fake_query.session_id = "bad-session"
-            with pytest.raises(ClaudeAgentError):
+            with pytest.raises(AgentError):
                 await agent.run("chat-1", "again")
             assert agent._session_map.get("chat-1") == "good-session"
         finally:
@@ -189,7 +190,7 @@ class TestErrorHandling:
         fake_query.is_error = True
         agent = ClaudeAgent(name="t", instructions="sys")
         try:
-            with pytest.raises(ClaudeAgentError):
+            with pytest.raises(AgentError):
                 await agent.run("chat-1", "hi")
             assert agent._session_map.get("chat-1") is None
         finally:
