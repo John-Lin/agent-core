@@ -42,6 +42,10 @@ config = {
         "model": "gpt-5.4",      # optional, default: gpt-5.4
         "apiType": "responses",  # optional: "responses" (default) or "chat_completions"
         "historyTurns": 10,      # optional, default: 10 — user turns kept in history
+        "shell": {               # optional; omit to disable the local ShellTool
+            "enabled": True,     # must be a bool — strings like "true"/"false" are rejected
+            "skillsDir": "/app/skills",  # optional path to SKILL.md skills
+        },
     },
     "mcpServers": {
         "my-tool": {
@@ -64,7 +68,7 @@ config = {
     "provider": {
         "type": "anthropic",
         "model": "claude-sonnet-4-6",  # optional, default: SDK's default
-        "allowedTools": ["WebFetch"],  # optional; added on top of the shell set
+        "allowedTools": ["Bash", "Read", "WebFetch"],  # optional; exact set of built-in tools to allow (duplicates dropped)
     },
     "mcpServers": {
         "my-stdio": {
