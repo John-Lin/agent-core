@@ -14,7 +14,7 @@ Both providers offer:
 - Per-conversation async lock to serialise concurrent messages
 - MCP server construction from a JSON config dict
 - Optional local shell / built-in tools gated by env vars
-- `instructions.md` in the working directory as the system prompt
+- `instructions.md` in the working directory as the system prompt (override path with `AGENT_INSTRUCTIONS_PATH`)
 
 ## Picking a provider
 
