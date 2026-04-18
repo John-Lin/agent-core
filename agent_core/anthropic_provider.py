@@ -22,6 +22,55 @@ from .session_map import ClaudeSessionMap
 # listed explicitly by the caller.
 DEFAULT_ALLOWED_TOOLS = ["Read", "Glob", "Grep"]
 
+# Every Claude Code built-in tool name known to us at the time of writing.
+# Kept in sync with https://code.claude.com/docs/en/tools-reference — revisit
+# when bumping claude-agent-sdk in case new tools have been added.
+#
+# claude-agent-sdk's `allowed_tools` is an auto-approval list, not a visibility
+# filter: unlisted built-ins still appear in the model's toolset and the model
+# will happily talk about them. To actually hide a tool, it must be named in
+# `disallowed_tools`. We compute that set as KNOWN_BUILTIN_TOOLS minus whatever
+# the caller opted into (DEFAULT_ALLOWED_TOOLS + provider.allowedTools).
+KNOWN_BUILTIN_TOOLS = frozenset(
+    {
+        "Agent",
+        "AskUserQuestion",
+        "Bash",
+        "CronCreate",
+        "CronDelete",
+        "CronList",
+        "Edit",
+        "EnterPlanMode",
+        "EnterWorktree",
+        "ExitPlanMode",
+        "ExitWorktree",
+        "Glob",
+        "Grep",
+        "ListMcpResourcesTool",
+        "LSP",
+        "Monitor",
+        "NotebookEdit",
+        "PowerShell",
+        "Read",
+        "ReadMcpResourceTool",
+        "SendMessage",
+        "Skill",
+        "TaskCreate",
+        "TaskGet",
+        "TaskList",
+        "TaskOutput",
+        "TaskStop",
+        "TaskUpdate",
+        "TeamCreate",
+        "TeamDelete",
+        "TodoWrite",
+        "ToolSearch",
+        "WebFetch",
+        "WebSearch",
+        "Write",
+    }
+)
+
 
 def _transform_mcp_servers(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Convert the shared opencode-style ``mcp`` config to claude-agent-sdk format.
@@ -51,9 +100,7 @@ def _transform_mcp_servers(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str
                 entry["headers"] = srv["headers"]
             out[name] = entry
         else:
-            raise ValueError(
-                f"MCP server {name!r}: 'type' must be 'local' or 'remote', got {mcp_type!r}"
-            )
+            raise ValueError(f"MCP server {name!r}: 'type' must be 'local' or 'remote', got {mcp_type!r}")
     return out
 
 
@@ -72,6 +119,7 @@ class ClaudeAgent:
         instructions: str,
         mcp_servers: dict[str, dict[str, Any]] | None = None,
         allowed_tools: list[str] | None = None,
+        disallowed_tools: list[str] | None = None,
         db_path: str = ":memory:",
         max_turns: int | None = None,
         model_name: str | None = None,
@@ -81,6 +129,9 @@ class ClaudeAgent:
         self._instructions = instructions
         self._mcp_servers = mcp_servers if mcp_servers is not None else {}
         self._allowed_tools = allowed_tools if allowed_tools is not None else []
+        if disallowed_tools is None:
+            disallowed_tools = sorted(KNOWN_BUILTIN_TOOLS - set(self._allowed_tools))
+        self._disallowed_tools = disallowed_tools
         self._model_name = model_name
         self._max_turns = max_turns
         self._setting_sources = setting_sources if setting_sources is not None else ["project"]
@@ -92,9 +143,8 @@ class ClaudeAgent:
         mcp_servers = _transform_mcp_servers(config.get("mcp", {}))
 
         provider_cfg = config.get("provider") or {}
-        tools: list[str] = list(
-            dict.fromkeys(DEFAULT_ALLOWED_TOOLS + list(provider_cfg.get("allowedTools", [])))
-        )
+        tools: list[str] = list(dict.fromkeys(DEFAULT_ALLOWED_TOOLS + list(provider_cfg.get("allowedTools", []))))
+        disallowed: list[str] = sorted(KNOWN_BUILTIN_TOOLS - set(tools))
         # Always scope settings to the project. Leaving this None would make
         # claude-agent-sdk inherit the host user's ~/.claude/ (MCP servers,
         # skills, subagents, slash commands) which is unsafe and
@@ -110,6 +160,7 @@ class ClaudeAgent:
             instructions=instructions,
             mcp_servers=mcp_servers,
             allowed_tools=tools,
+            disallowed_tools=disallowed,
             db_path=db_path,
             model_name=model_name,
             setting_sources=setting_sources,
@@ -128,6 +179,7 @@ class ClaudeAgent:
                 # but the dict-literal form we build is accepted at runtime.
                 mcp_servers=cast("Any", self._mcp_servers),
                 allowed_tools=self._allowed_tools,
+                disallowed_tools=self._disallowed_tools,
                 resume=resume_id,
                 max_turns=self._max_turns,
                 model=self._model_name,

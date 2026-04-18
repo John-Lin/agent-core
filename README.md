@@ -105,11 +105,22 @@ Differences from the OpenAI provider:
   are Anthropic's "no permission required" tools and carry no write or
   exec risk. Any tool that can mutate files or run commands (`Write`,
   `Edit`, `Bash`, `WebFetch`, …) must be listed explicitly in
-  `config["provider"]["allowedTools"]`. Tool names are case-sensitive
-  and validated by the SDK, not by us — an unrecognized name (e.g. a
-  typo like `"webSearch"`) is silently dropped. See Anthropic's
-  [tools reference](https://code.claude.com/docs/en/tools-reference)
+  `config["provider"]["allowedTools"]`. This includes `Skill`: if the
+  agent needs to run project skills under `.claude/skills/`, add
+  `"Skill"` to `allowedTools` — otherwise the Skill tool is blocked.
+  Tool names are case-sensitive and validated by the SDK, not by us —
+  an unrecognized name (e.g. a typo like `"webSearch"`) is silently
+  dropped. See Anthropic's [tools reference](https://code.claude.com/docs/en/tools-reference)
   for the canonical list and exact casing.
+- Built-ins the caller does *not* opt into are placed in the SDK's
+  `disallowed_tools` list, not merely absent from `allowed_tools`.
+  This matters because `allowed_tools` is an auto-approval list, not
+  a visibility filter: a tool that is absent from `allowed_tools` but
+  also absent from `disallowed_tools` still shows up in the model's
+  toolset (so the model can see it and describe it to users), it just
+  fails at call time. We maintain a `KNOWN_BUILTIN_TOOLS` list in
+  `anthropic_provider.py` and subtract the caller's allowlist from it
+  to produce the actual block list.
 - All tool execution happens locally in the CLI subprocess the SDK
   spawns — there is no hosted sandbox.
 

@@ -244,6 +244,31 @@ class TestFromDict:
         )
         assert agent._allowed_tools == ["Read", "Glob", "Grep", "Bash"]
 
+    def test_default_disallowed_tools_block_all_non_readonly_builtins(self, stub_instructions, fake_query):  # noqa: ARG002
+        # allowed_tools alone does not hide Claude Code built-ins from the model — it is
+        # only an auto-approval list. To actually block them, the unwanted ones must go
+        # into disallowed_tools. With no user allowedTools, every built-in except the
+        # read-only defaults (Read/Glob/Grep) should be blocked.
+        agent = ClaudeAgent.from_dict("t", {})
+        disallowed = set(agent._disallowed_tools)
+        # Read/Glob/Grep must not be blocked — they are the baseline.
+        assert {"Read", "Glob", "Grep"}.isdisjoint(disallowed)
+        # Permission-required built-ins that the user did not opt into must be blocked.
+        for name in ("Bash", "Write", "Edit", "WebFetch", "WebSearch", "Skill", "NotebookEdit"):
+            assert name in disallowed, f"{name} must be in disallowed_tools by default"
+
+    def test_config_allowed_tools_drop_out_of_disallowed(self, stub_instructions, fake_query):  # noqa: ARG002
+        agent = ClaudeAgent.from_dict(
+            "t",
+            {"provider": {"type": "anthropic", "allowedTools": ["Bash", "Skill"]}},
+        )
+        disallowed = set(agent._disallowed_tools)
+        assert "Bash" not in disallowed
+        assert "Skill" not in disallowed
+        # Other built-ins the user did not ask for must remain blocked.
+        assert "Write" in disallowed
+        assert "WebFetch" in disallowed
+
     def test_mcp_local_server_transformed(self, stub_instructions, fake_query):  # noqa: ARG002
         config = {
             "mcp": {
@@ -307,6 +332,11 @@ class TestOptionsWiring:
         assert "srv" in opts.mcp_servers
         assert "WebFetch" in opts.allowed_tools
         assert "Bash" in opts.allowed_tools
+        # disallowed_tools must reach the SDK too — otherwise non-listed built-ins
+        # remain visible to the model even if they cannot be invoked.
+        assert "Write" in opts.disallowed_tools
+        assert "Skill" in opts.disallowed_tools
+        assert "Bash" not in opts.disallowed_tools
         assert opts.setting_sources == ["project"]
 
     @pytest.mark.anyio
