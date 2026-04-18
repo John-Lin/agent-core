@@ -79,7 +79,7 @@ class ClaudeAgent:
         mcp_servers = _transform_mcp_servers(config.get("mcpServers", {}))
 
         provider_cfg = config.get("provider") or {}
-        tools: list[str] = list(provider_cfg.get("allowedTools", []))
+        tools: list[str] = list(dict.fromkeys(provider_cfg.get("allowedTools", [])))
         # Always scope settings to the project. Leaving this None would make
         # claude-agent-sdk inherit the host user's ~/.claude/ (MCP servers,
         # skills, subagents, slash commands) which is unsafe and

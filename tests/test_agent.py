@@ -666,6 +666,12 @@ class TestShellToolConfiguration:
 
         assert self._get_shell_tools(agent) == []
 
+    @pytest.mark.parametrize("bad_value", ["true", "false", 1, 0, None])
+    def test_non_bool_enabled_rejected(self, bad_value):
+        config = {"mcpServers": {}, "provider": {"type": "openai", "shell": {"enabled": bad_value}}}
+        with pytest.raises(ValueError, match="provider.shell.enabled must be a bool"):
+            OpenAIAgent.from_dict("test", config)
+
     def test_orphaned_skills_dir_without_shell_enabled_warns(self, tmp_path, caplog):
         with caplog.at_level("WARNING", logger="root"):
             agent = OpenAIAgent.from_dict("test", self._config(enabled=False, skills_dir=tmp_path))

@@ -285,8 +285,11 @@ class OpenAIAgent:
         provider_cfg = config.get("provider") or {}
         shell_cfg = provider_cfg.get("shell") or {}
         tools: list[Any] = []
+        enabled = shell_cfg.get("enabled", False)
+        if not isinstance(enabled, bool):
+            raise ValueError(f"provider.shell.enabled must be a bool, got {type(enabled).__name__}: {enabled!r}")
         environment = _get_shell_environment(
-            enabled=bool(shell_cfg.get("enabled", False)),
+            enabled=enabled,
             skills_dir=shell_cfg.get("skillsDir"),
         )
         if environment is not None:

@@ -236,6 +236,13 @@ class TestFromDict:
         assert agent._allowed_tools == ["Bash", "Read", "WebFetch"]
         assert agent._setting_sources == ["project"]
 
+    def test_config_allowed_tools_deduplicated_preserving_order(self, stub_instructions, fake_query):  # noqa: ARG002
+        agent = ClaudeAgent.from_dict(
+            "t",
+            {"provider": {"type": "anthropic", "allowedTools": ["Bash", "Read", "Bash", "WebFetch", "Read"]}},
+        )
+        assert agent._allowed_tools == ["Bash", "Read", "WebFetch"]
+
     def test_mcp_stdio_server_transformed(self, stub_instructions, fake_query):  # noqa: ARG002
         config = {
             "mcpServers": {
