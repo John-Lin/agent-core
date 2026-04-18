@@ -105,7 +105,11 @@ Differences from the OpenAI provider:
   are Anthropic's "no permission required" tools and carry no write or
   exec risk. Any tool that can mutate files or run commands (`Write`,
   `Edit`, `Bash`, `WebFetch`, …) must be listed explicitly in
-  `config["provider"]["allowedTools"]`.
+  `config["provider"]["allowedTools"]`. Tool names are case-sensitive
+  and validated by the SDK, not by us — an unrecognized name (e.g. a
+  typo like `"webSearch"`) is silently dropped. See Anthropic's
+  [tools reference](https://code.claude.com/docs/en/tools-reference)
+  for the canonical list and exact casing.
 - All tool execution happens locally in the CLI subprocess the SDK
   spawns — there is no hosted sandbox.
 
