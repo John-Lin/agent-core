@@ -126,6 +126,8 @@ except AgentError as e:
 | `rate_limit` | `openai.RateLimitError` | — (surfaces via `is_error`) |
 | `auth` | `openai.AuthenticationError` | — |
 | `bad_request` | `openai.BadRequestError` | — |
+| `timeout` | `openai.APITimeoutError` | — |
+| `connection` | `openai.APIConnectionError` | — |
 | `api_status` | other `openai.APIStatusError` | — |
 | `model_behavior` | `agents.ModelBehaviorError` | — |
 | `guardrail` | Input/Output guardrail tripwires | — |

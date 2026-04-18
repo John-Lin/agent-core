@@ -317,6 +317,13 @@ class OpenAIAgent:
                 raise AgentError(str(e), subtype="auth", provider="openai") from e
             except openai.BadRequestError as e:
                 raise AgentError(str(e), subtype="bad_request", provider="openai") from e
+            except openai.APITimeoutError as e:
+                raise AgentError(str(e), subtype="timeout", provider="openai") from e
+            except openai.APIConnectionError as e:
+                raise AgentError(str(e), subtype="connection", provider="openai") from e
+            # Catch-all for remaining HTTP-status errors (InternalServerError,
+            # PermissionDeniedError, NotFoundError, ...). Specific ones above
+            # keep their own subtype; anything else collapses to "api_status".
             except openai.APIStatusError as e:
                 raise AgentError(str(e), subtype="api_status", provider="openai") from e
             new_items = result.to_input_list()[len(truncated) :]
