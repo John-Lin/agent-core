@@ -17,30 +17,36 @@ from .session_map import ClaudeSessionMap
 
 
 def _transform_mcp_servers(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Convert the shared mcpServers config shape to claude-agent-sdk format.
+    """Convert the shared opencode-style ``mcp`` config to claude-agent-sdk format.
 
-    The shared shape (same one OpenAIAgent.from_dict consumes) uses "command"
-    for stdio servers and "url" for HTTP. claude-agent-sdk expects an explicit
-    "type" key on each entry.
+    Input uses ``type: "local" | "remote"`` as the transport discriminator
+    (matching opencode's schema). Output uses claude-agent-sdk's
+    ``type: "stdio" | "http"`` shape.
     """
     out: dict[str, dict[str, Any]] = {}
     for name, srv in raw.items():
         if not srv.get("enabled", True):
             continue
-        if "url" in srv:
-            entry: dict[str, Any] = {"type": "http", "url": srv["url"]}
+        mcp_type = srv.get("type")
+        if mcp_type == "local":
+            command = srv.get("command")
+            if not isinstance(command, list) or not command:
+                raise ValueError(f"MCP server {name!r}: 'command' must be a non-empty list")
+            entry: dict[str, Any] = {"type": "stdio", "command": command[0]}
+            if len(command) > 1:
+                entry["args"] = command[1:]
+            if srv.get("environment") is not None:
+                entry["env"] = srv["environment"]
+            out[name] = entry
+        elif mcp_type == "remote":
+            entry = {"type": "http", "url": srv["url"]}
             if "headers" in srv:
                 entry["headers"] = srv["headers"]
             out[name] = entry
-        elif "command" in srv:
-            entry = {"type": "stdio", "command": srv["command"]}
-            if "args" in srv:
-                entry["args"] = srv["args"]
-            if srv.get("env") is not None:
-                entry["env"] = srv["env"]
-            out[name] = entry
         else:
-            raise ValueError(f"MCP server {name!r} must have either 'url' (HTTP) or 'command' (stdio)")
+            raise ValueError(
+                f"MCP server {name!r}: 'type' must be 'local' or 'remote', got {mcp_type!r}"
+            )
     return out
 
 
@@ -76,7 +82,7 @@ class ClaudeAgent:
 
     @classmethod
     def from_dict(cls, name: str, config: dict[str, Any]) -> ClaudeAgent:
-        mcp_servers = _transform_mcp_servers(config.get("mcpServers", {}))
+        mcp_servers = _transform_mcp_servers(config.get("mcp", {}))
 
         provider_cfg = config.get("provider") or {}
         tools: list[str] = list(dict.fromkeys(provider_cfg.get("allowedTools", [])))

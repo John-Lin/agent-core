@@ -74,7 +74,7 @@ class TestFromDictModel:
             return create_autospec(Model)
 
         with patch("agent_core.openai_provider._get_model", side_effect=fake_get_model):
-            OpenAIAgent.from_dict("test", {"mcpServers": {}})
+            OpenAIAgent.from_dict("test", {"mcp": {}})
 
         from agent_core.openai_provider import OPENAI_API_TYPE_DEFAULT
         from agent_core.openai_provider import OPENAI_MODEL_DEFAULT
@@ -93,7 +93,7 @@ class TestFromDictModel:
         with patch("agent_core.openai_provider._get_model", side_effect=fake_get_model):
             OpenAIAgent.from_dict(
                 "test",
-                {"mcpServers": {}, "provider": {"type": "openai", "model": "gpt-4o-mini"}},
+                {"mcp": {}, "provider": {"type": "openai", "model": "gpt-4o-mini"}},
             )
 
         assert captured["model_name"] == "gpt-4o-mini"
@@ -109,7 +109,7 @@ class TestFromDictModel:
         with patch("agent_core.openai_provider._get_model", side_effect=fake_get_model):
             OpenAIAgent.from_dict(
                 "test",
-                {"mcpServers": {}, "provider": {"type": "openai", "apiType": "chat_completions"}},
+                {"mcp": {}, "provider": {"type": "openai", "apiType": "chat_completions"}},
             )
 
         assert captured["api_type"] == "chat_completions"
@@ -200,21 +200,22 @@ class TestInstructions:
     def test_from_dict_loads_instructions_from_file(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / "instructions.md").write_text("From file prompt.", encoding="utf-8")
-        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+        agent = OpenAIAgent.from_dict("test", {"mcp": {}})
         assert agent.agent.instructions == "From file prompt."
 
     def test_from_dict_fails_fast_when_instructions_file_missing(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         with pytest.raises(FileNotFoundError, match="Instructions file not found"):
-            OpenAIAgent.from_dict("test", {"mcpServers": {}})
+            OpenAIAgent.from_dict("test", {"mcp": {}})
 
 
 @pytest.mark.usefixtures("_stub_instructions")
 class TestFromDictMcpServers:
-    def test_url_creates_streamable_http_server(self):
+    def test_remote_creates_streamable_http_server(self):
         config = {
-            "mcpServers": {
+            "mcp": {
                 "my-server": {
+                    "type": "remote",
                     "url": "http://localhost:8000/mcp",
                 }
             },
@@ -223,10 +224,11 @@ class TestFromDictMcpServers:
         assert len(agent.agent.mcp_servers) == 1
         assert isinstance(agent.agent.mcp_servers[0], MCPServerStreamableHttp)
 
-    def test_url_passes_headers(self):
+    def test_remote_passes_headers(self):
         config = {
-            "mcpServers": {
+            "mcp": {
                 "my-server": {
+                    "type": "remote",
                     "url": "http://localhost:8000/mcp",
                     "headers": {"Authorization": "Bearer token"},
                 }
@@ -236,12 +238,12 @@ class TestFromDictMcpServers:
         server = agent.agent.mcp_servers[0]
         assert isinstance(server, MCPServerStreamableHttp)
 
-    def test_command_creates_stdio_server(self):
+    def test_local_creates_stdio_server(self):
         config = {
-            "mcpServers": {
+            "mcp": {
                 "my-server": {
-                    "command": "npx",
-                    "args": ["-y", "some-mcp-server"],
+                    "type": "local",
+                    "command": ["npx", "-y", "some-mcp-server"],
                 }
             },
         }
@@ -251,19 +253,20 @@ class TestFromDictMcpServers:
 
     def test_mixed_servers(self):
         config = {
-            "mcpServers": {
-                "remote": {"url": "http://localhost:8000/mcp"},
-                "local": {"command": "npx", "args": ["-y", "server"]},
+            "mcp": {
+                "remote": {"type": "remote", "url": "http://localhost:8000/mcp"},
+                "local": {"type": "local", "command": ["npx", "-y", "server"]},
             },
         }
         agent = OpenAIAgent.from_dict("test", config)
         types = {type(s) for s in agent.agent.mcp_servers}
         assert types == {MCPServerStreamableHttp, MCPServerStdio}
 
-    def test_disabled_http_server_is_skipped(self):
+    def test_disabled_remote_server_is_skipped(self):
         config = {
-            "mcpServers": {
+            "mcp": {
                 "my-server": {
+                    "type": "remote",
                     "url": "http://localhost:8000/mcp",
                     "enabled": False,
                 }
@@ -272,12 +275,12 @@ class TestFromDictMcpServers:
         agent = OpenAIAgent.from_dict("test", config)
         assert len(agent.agent.mcp_servers) == 0
 
-    def test_disabled_stdio_server_is_skipped(self):
+    def test_disabled_local_server_is_skipped(self):
         config = {
-            "mcpServers": {
+            "mcp": {
                 "my-server": {
-                    "command": "npx",
-                    "args": ["-y", "server"],
+                    "type": "local",
+                    "command": ["npx", "-y", "server"],
                     "enabled": False,
                 }
             },
@@ -287,8 +290,9 @@ class TestFromDictMcpServers:
 
     def test_enabled_true_server_is_included(self):
         config = {
-            "mcpServers": {
+            "mcp": {
                 "my-server": {
+                    "type": "remote",
                     "url": "http://localhost:8000/mcp",
                     "enabled": True,
                 }
@@ -299,9 +303,9 @@ class TestFromDictMcpServers:
 
     def test_mixed_enabled_disabled_servers(self):
         config = {
-            "mcpServers": {
-                "active": {"url": "http://localhost:8000/mcp", "enabled": True},
-                "inactive": {"command": "npx", "args": [], "enabled": False},
+            "mcp": {
+                "active": {"type": "remote", "url": "http://localhost:8000/mcp", "enabled": True},
+                "inactive": {"type": "local", "command": ["npx"], "enabled": False},
             },
         }
         agent = OpenAIAgent.from_dict("test", config)
@@ -310,17 +314,18 @@ class TestFromDictMcpServers:
 
     def test_default_session_timeout_used_when_not_specified(self):
         config = {
-            "mcpServers": {
-                "my-server": {"url": "http://localhost:8000/mcp"},
+            "mcp": {
+                "my-server": {"type": "remote", "url": "http://localhost:8000/mcp"},
             },
         }
         agent = OpenAIAgent.from_dict("test", config)
         assert cast(Any, agent.agent.mcp_servers[0]).client_session_timeout_seconds == MCP_SESSION_TIMEOUT_SECONDS
 
-    def test_per_server_timeout_http(self):
+    def test_per_server_timeout_remote(self):
         config = {
-            "mcpServers": {
+            "mcp": {
                 "my-server": {
+                    "type": "remote",
                     "url": "http://localhost:8000/mcp",
                     "timeout": 60.0,
                 }
@@ -329,18 +334,28 @@ class TestFromDictMcpServers:
         agent = OpenAIAgent.from_dict("test", config)
         assert cast(Any, agent.agent.mcp_servers[0]).client_session_timeout_seconds == 60.0
 
-    def test_per_server_timeout_stdio(self):
+    def test_per_server_timeout_local(self):
         config = {
-            "mcpServers": {
+            "mcp": {
                 "my-server": {
-                    "command": "npx",
-                    "args": ["-y", "server"],
+                    "type": "local",
+                    "command": ["npx", "-y", "server"],
                     "timeout": 120.0,
                 }
             },
         }
         agent = OpenAIAgent.from_dict("test", config)
         assert cast(Any, agent.agent.mcp_servers[0]).client_session_timeout_seconds == 120.0
+
+    def test_invalid_type_raises(self):
+        config = {"mcp": {"bad": {"type": "unknown"}}}
+        with pytest.raises(ValueError, match="'type' must be 'local' or 'remote'"):
+            OpenAIAgent.from_dict("test", config)
+
+    def test_local_without_command_list_raises(self):
+        config = {"mcp": {"bad": {"type": "local", "command": "npx"}}}
+        with pytest.raises(ValueError, match="'command' must be a non-empty list"):
+            OpenAIAgent.from_dict("test", config)
 
 
 class TestHistoryTurnsConstant:
@@ -351,13 +366,13 @@ class TestHistoryTurnsConstant:
 @pytest.mark.usefixtures("_stub_instructions")
 class TestFromDictHistoryTurns:
     def test_default_history_turns_when_not_in_config(self):
-        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+        agent = OpenAIAgent.from_dict("test", {"mcp": {}})
         assert agent.history_turns == HISTORY_TURNS_DEFAULT
 
     def test_custom_history_turns_from_config(self):
         agent = OpenAIAgent.from_dict(
             "test",
-            {"mcpServers": {}, "provider": {"type": "openai", "historyTurns": 5}},
+            {"mcp": {}, "provider": {"type": "openai", "historyTurns": 5}},
         )
         assert agent.history_turns == 5
 
@@ -365,7 +380,7 @@ class TestFromDictHistoryTurns:
     async def test_custom_history_turns_applied_during_run(self):
         agent = OpenAIAgent.from_dict(
             "test",
-            {"mcpServers": {}, "provider": {"type": "openai", "historyTurns": 3}},
+            {"mcp": {}, "provider": {"type": "openai", "historyTurns": 3}},
         )
         captured_inputs = []
 
@@ -410,7 +425,7 @@ class TestSessionDbPath:
         (tmp_path / "instructions.md").write_text("x", encoding="utf-8")
         monkeypatch.delenv("SESSION_DB_PATH", raising=False)
 
-        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+        agent = OpenAIAgent.from_dict("test", {"mcp": {}})
         session = agent._get_session(1)
         assert session.db_path == ":memory:"
 
@@ -420,7 +435,7 @@ class TestSessionDbPath:
         db = str(tmp_path / "conv.db")
         monkeypatch.setenv("SESSION_DB_PATH", db)
 
-        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+        agent = OpenAIAgent.from_dict("test", {"mcp": {}})
         session = agent._get_session(1)
         assert str(session.db_path) == db
 
@@ -645,7 +660,7 @@ class TestShellToolConfiguration:
         shell: dict = {"enabled": enabled}
         if skills_dir is not None:
             shell["skillsDir"] = str(skills_dir)
-        return {"mcpServers": {}, "provider": {"type": "openai", "shell": shell}}
+        return {"mcp": {}, "provider": {"type": "openai", "shell": shell}}
 
     def _make_skill(self, parent: Path, name: str, description: str = "desc") -> Path:
         skill_dir = parent / name
@@ -662,13 +677,13 @@ class TestShellToolConfiguration:
         assert self._get_shell_tools(agent) == []
 
     def test_missing_shell_config_means_disabled(self):
-        agent = OpenAIAgent.from_dict("test", {"mcpServers": {}})
+        agent = OpenAIAgent.from_dict("test", {"mcp": {}})
 
         assert self._get_shell_tools(agent) == []
 
     @pytest.mark.parametrize("bad_value", ["true", "false", 1, 0, None])
     def test_non_bool_enabled_rejected(self, bad_value):
-        config = {"mcpServers": {}, "provider": {"type": "openai", "shell": {"enabled": bad_value}}}
+        config = {"mcp": {}, "provider": {"type": "openai", "shell": {"enabled": bad_value}}}
         with pytest.raises(ValueError, match="provider.shell.enabled must be a bool"):
             OpenAIAgent.from_dict("test", config)
 
@@ -736,7 +751,7 @@ class TestShellToolConfiguration:
         self._make_skill(tmp_path, "s")
 
         config = self._config(enabled=True, skills_dir=tmp_path)
-        config["mcpServers"] = {"my-mcp": {"command": "uvx", "args": ["something"]}}
+        config["mcp"] = {"my-mcp": {"type": "local", "command": ["uvx", "something"]}}
         agent = OpenAIAgent.from_dict("test", config)
 
         assert len(agent.agent.mcp_servers) == 1

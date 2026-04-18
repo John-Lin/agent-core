@@ -243,43 +243,44 @@ class TestFromDict:
         )
         assert agent._allowed_tools == ["Bash", "Read", "WebFetch"]
 
-    def test_mcp_stdio_server_transformed(self, stub_instructions, fake_query):  # noqa: ARG002
+    def test_mcp_local_server_transformed(self, stub_instructions, fake_query):  # noqa: ARG002
         config = {
-            "mcpServers": {
-                "my-stdio": {
-                    "command": "python",
-                    "args": ["-m", "srv"],
-                    "env": {"FOO": "bar"},
+            "mcp": {
+                "my-local": {
+                    "type": "local",
+                    "command": ["python", "-m", "srv"],
+                    "environment": {"FOO": "bar"},
                 }
             }
         }
         agent = ClaudeAgent.from_dict("t", config)
-        srv = agent._mcp_servers["my-stdio"]
+        srv = agent._mcp_servers["my-local"]
         assert srv["type"] == "stdio"
         assert srv["command"] == "python"
         assert srv["args"] == ["-m", "srv"]
         assert srv["env"] == {"FOO": "bar"}
 
-    def test_mcp_http_server_transformed(self, stub_instructions, fake_query):  # noqa: ARG002
+    def test_mcp_remote_server_transformed(self, stub_instructions, fake_query):  # noqa: ARG002
         config = {
-            "mcpServers": {
-                "my-http": {
+            "mcp": {
+                "my-remote": {
+                    "type": "remote",
                     "url": "https://example.com/mcp",
                     "headers": {"Authorization": "Bearer x"},
                 }
             }
         }
         agent = ClaudeAgent.from_dict("t", config)
-        srv = agent._mcp_servers["my-http"]
+        srv = agent._mcp_servers["my-remote"]
         assert srv["type"] == "http"
         assert srv["url"] == "https://example.com/mcp"
         assert srv["headers"] == {"Authorization": "Bearer x"}
 
     def test_mcp_disabled_server_skipped(self, stub_instructions, fake_query):  # noqa: ARG002
         config = {
-            "mcpServers": {
-                "off": {"command": "x", "enabled": False},
-                "on": {"command": "y"},
+            "mcp": {
+                "off": {"type": "local", "command": ["x"], "enabled": False},
+                "on": {"type": "local", "command": ["y"]},
             }
         }
         agent = ClaudeAgent.from_dict("t", config)
@@ -293,7 +294,7 @@ class TestOptionsWiring:
         agent = ClaudeAgent.from_dict(
             "t",
             {
-                "mcpServers": {"srv": {"command": "x"}},
+                "mcp": {"srv": {"type": "local", "command": ["x"]}},
                 "provider": {"type": "anthropic", "allowedTools": ["Bash", "WebFetch"]},
             },
         )
@@ -345,12 +346,23 @@ class TestConnectCleanup:
 
 
 class TestMcpTransform:
-    def test_malformed_server_raises_value_error(self, fake_query):  # noqa: ARG002
-        """A config entry with neither 'url' nor 'command' must raise a clear error."""
+    def test_missing_type_raises_value_error(self, fake_query):  # noqa: ARG002
         from agent_core.anthropic_provider import _transform_mcp_servers
 
-        with pytest.raises(ValueError, match="must have either"):
+        with pytest.raises(ValueError, match="'type' must be 'local' or 'remote'"):
             _transform_mcp_servers({"bad": {"enabled": True}})
+
+    def test_invalid_type_raises_value_error(self, fake_query):  # noqa: ARG002
+        from agent_core.anthropic_provider import _transform_mcp_servers
+
+        with pytest.raises(ValueError, match="'type' must be 'local' or 'remote'"):
+            _transform_mcp_servers({"bad": {"type": "websocket", "url": "x"}})
+
+    def test_local_without_command_list_raises(self, fake_query):  # noqa: ARG002
+        from agent_core.anthropic_provider import _transform_mcp_servers
+
+        with pytest.raises(ValueError, match="'command' must be a non-empty list"):
+            _transform_mcp_servers({"bad": {"type": "local", "command": "x"}})
 
 
 class TestEmptyStream:
