@@ -117,6 +117,7 @@ class ClaudeAgent:
         self,
         name: str,
         instructions: str,
+        claude_home: str,
         mcp_servers: dict[str, dict[str, Any]] | None = None,
         allowed_tools: list[str] | None = None,
         disallowed_tools: list[str] | None = None,
@@ -125,6 +126,16 @@ class ClaudeAgent:
         model_name: str | None = None,
         setting_sources: list[str] | None = None,
     ) -> None:
+        if not claude_home:
+            # Required unconditionally — without it the CLI subprocess falls
+            # back to the parent's $HOME and reads the host user's personal
+            # ~/.claude.json (OAuth session, MCP config, project history).
+            # There is no safe implicit default; callers must name a writable
+            # directory the agent owns.
+            raise ValueError(
+                "claude_home is required — point it at a dedicated directory "
+                "so the CLI subprocess does not read the host user's ~/.claude.json."
+            )
         self.name = name
         self._instructions = instructions
         self._mcp_servers = mcp_servers if mcp_servers is not None else {}
@@ -132,6 +143,7 @@ class ClaudeAgent:
         if disallowed_tools is None:
             disallowed_tools = sorted(KNOWN_BUILTIN_TOOLS - set(self._allowed_tools))
         self._disallowed_tools = disallowed_tools
+        self._claude_home = claude_home
         self._model_name = model_name
         self._max_turns = max_turns
         self._setting_sources = setting_sources if setting_sources is not None else ["project"]
@@ -145,6 +157,13 @@ class ClaudeAgent:
         provider_cfg = config.get("provider") or {}
         tools: list[str] = list(dict.fromkeys(DEFAULT_ALLOWED_TOOLS + list(provider_cfg.get("allowedTools", []))))
         disallowed: list[str] = sorted(KNOWN_BUILTIN_TOOLS - set(tools))
+        claude_home = provider_cfg.get("claudeHome")
+        if not claude_home:
+            raise ValueError(
+                "provider.claudeHome is required for the Anthropic provider — "
+                "point it at a dedicated directory so the CLI subprocess does "
+                "not read the host user's ~/.claude.json."
+            )
         # Always scope settings to the project. Leaving this None would make
         # claude-agent-sdk inherit the host user's ~/.claude/ (MCP servers,
         # skills, subagents, slash commands) which is unsafe and
@@ -164,6 +183,7 @@ class ClaudeAgent:
             db_path=db_path,
             model_name=model_name,
             setting_sources=setting_sources,
+            claude_home=claude_home,
         )
 
     async def connect(self) -> None:
@@ -173,6 +193,10 @@ class ClaudeAgent:
         lock = self._locks.setdefault(chat_id, asyncio.Lock())
         async with lock:
             resume_id = self._session_map.get(chat_id)
+            # Overriding HOME redirects the CLI subprocess from the host
+            # user's ~/.claude.json (OAuth, projects, personal MCP) to an
+            # isolated directory owned by this agent.
+            env = {"HOME": self._claude_home}
             options = ClaudeAgentOptions(
                 system_prompt=self._instructions,
                 # cast: SDK stub types mcp_servers as a union of specific TypedDicts,
@@ -186,6 +210,7 @@ class ClaudeAgent:
                 # cast: SDK stub expects list[Literal["user","project","local"]]
                 # but plain list[str] is identical at runtime.
                 setting_sources=cast("list[Any] | None", self._setting_sources),
+                env=env,
             )
             final_text = ""
             captured_session_id: str | None = None

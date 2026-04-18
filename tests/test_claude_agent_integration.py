@@ -19,6 +19,7 @@ async def test_round_trip_through_live_sdk():
         name="integration",
         instructions="You are a terse assistant. Reply in one short sentence.",
         max_turns=1,
+        claude_home="/tmp/agent-core-integration-home",
     )
     try:
         reply = await agent.run("integration-chat", "Say 'pong' and nothing else.")

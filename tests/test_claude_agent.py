@@ -15,6 +15,10 @@ from claude_agent_sdk import TextBlock
 from agent_core import AgentError
 from agent_core.anthropic_provider import ClaudeAgent
 
+# Placeholder home for from_dict tests. Never touched on disk — fake_query
+# short-circuits before the CLI subprocess would spawn.
+_TEST_HOME = "/tmp/agent-core-test-home"
+
 
 @dataclass
 class QueryCall:
@@ -79,7 +83,7 @@ def fake_query(monkeypatch):
 class TestRun:
     @pytest.mark.anyio
     async def test_returns_result_text_from_result_message(self, fake_query):
-        agent = ClaudeAgent(name="t", instructions="sys")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
         try:
             out = await agent.run("chat-1", "hi")
         finally:
@@ -88,7 +92,7 @@ class TestRun:
 
     @pytest.mark.anyio
     async def test_first_call_has_no_resume(self, fake_query):
-        agent = ClaudeAgent(name="t", instructions="sys")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
         try:
             await agent.run("chat-1", "hi")
         finally:
@@ -98,7 +102,7 @@ class TestRun:
     @pytest.mark.anyio
     async def test_second_call_resumes_stored_session(self, fake_query):
         fake_query.session_id = "session-abc"
-        agent = ClaudeAgent(name="t", instructions="sys")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
         try:
             await agent.run("chat-1", "hi")
             await agent.run("chat-1", "again")
@@ -108,7 +112,7 @@ class TestRun:
 
     @pytest.mark.anyio
     async def test_different_chats_have_independent_sessions(self, fake_query):
-        agent = ClaudeAgent(name="t", instructions="sys")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
         try:
             fake_query.session_id = "sess-A"
             await agent.run("chat-A", "hi")
@@ -125,7 +129,7 @@ class TestRun:
 
     @pytest.mark.anyio
     async def test_prompt_and_system_prompt_are_passed(self, fake_query):
-        agent = ClaudeAgent(name="t", instructions="you are a bot")
+        agent = ClaudeAgent(name="t", instructions="you are a bot", claude_home=_TEST_HOME)
         try:
             await agent.run("chat-1", "what is 2+2?")
         finally:
@@ -140,7 +144,7 @@ class TestErrorHandling:
     async def test_is_error_raises_agent_error(self, fake_query):
         fake_query.is_error = True
         fake_query.result_text = "Credit balance is too low"
-        agent = ClaudeAgent(name="t", instructions="sys")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
         try:
             with pytest.raises(AgentError) as exc_info:
                 await agent.run("chat-1", "hi")
@@ -154,7 +158,7 @@ class TestErrorHandling:
         fake_query.subtype = "error_max_turns"
         fake_query.session_id = "sess-err"
         fake_query.result_text = "max turns hit"
-        agent = ClaudeAgent(name="t", instructions="sys")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
         try:
             with pytest.raises(AgentError) as exc_info:
                 await agent.run("chat-1", "hi")
@@ -168,7 +172,7 @@ class TestErrorHandling:
     async def test_errored_session_id_is_not_saved_to_mapping(self, fake_query):
         """A failed run must not overwrite the prior good session id,
         so that retrying resumes the last successful conversation."""
-        agent = ClaudeAgent(name="t", instructions="sys")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
         try:
             # First call succeeds and stores "good-session".
             fake_query.session_id = "good-session"
@@ -187,7 +191,7 @@ class TestErrorHandling:
     @pytest.mark.anyio
     async def test_first_call_error_leaves_mapping_empty(self, fake_query):
         fake_query.is_error = True
-        agent = ClaudeAgent(name="t", instructions="sys")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
         try:
             with pytest.raises(AgentError):
                 await agent.run("chat-1", "hi")
@@ -198,40 +202,46 @@ class TestErrorHandling:
 
 class TestFromDict:
     def test_instructions_loaded_from_file(self, stub_instructions, fake_query, monkeypatch):  # noqa: ARG002
-        agent = ClaudeAgent.from_dict("t", {})
+        agent = ClaudeAgent.from_dict("t", {"provider": {"claudeHome": _TEST_HOME}})
         assert agent._instructions == "stub instructions"
 
     def test_model_default_is_none(self, stub_instructions, fake_query):  # noqa: ARG002
-        agent = ClaudeAgent.from_dict("t", {})
+        agent = ClaudeAgent.from_dict("t", {"provider": {"claudeHome": _TEST_HOME}})
         assert agent._model_name is None
 
     def test_model_from_config(self, stub_instructions, fake_query):  # noqa: ARG002
         agent = ClaudeAgent.from_dict(
             "t",
-            {"provider": {"type": "anthropic", "model": "claude-sonnet-4-6"}},
+            {"provider": {"type": "anthropic", "claudeHome": _TEST_HOME, "model": "claude-sonnet-4-6"}},
         )
         assert agent._model_name == "claude-sonnet-4-6"
 
     def test_max_turns_default_is_none(self, stub_instructions, fake_query):  # noqa: ARG002
-        agent = ClaudeAgent.from_dict("t", {})
+        agent = ClaudeAgent.from_dict("t", {"provider": {"claudeHome": _TEST_HOME}})
         assert agent._max_turns is None
 
     def test_default_allowed_tools_are_read_only_builtins(self, stub_instructions, fake_query):  # noqa: ARG002
-        agent = ClaudeAgent.from_dict("t", {})
+        agent = ClaudeAgent.from_dict("t", {"provider": {"claudeHome": _TEST_HOME}})
         assert agent._allowed_tools == ["Read", "Glob", "Grep"]
 
     def test_setting_sources_always_scoped_to_project(self, stub_instructions, fake_query):  # noqa: ARG002
-        agent = ClaudeAgent.from_dict("t", {})
+        agent = ClaudeAgent.from_dict("t", {"provider": {"claudeHome": _TEST_HOME}})
         assert agent._setting_sources == ["project"]
 
     def test_constructor_default_setting_sources_is_project(self, fake_query):  # noqa: ARG002
-        agent = ClaudeAgent(name="t", instructions="sys")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
         assert agent._setting_sources == ["project"]
 
     def test_config_allowed_tools_extend_defaults(self, stub_instructions, fake_query):  # noqa: ARG002
         agent = ClaudeAgent.from_dict(
             "t",
-            {"provider": {"type": "anthropic", "allowedTools": ["Bash", "Write", "WebFetch"]}},
+            {
+                "provider": {
+                    "type": "anthropic",
+                    "claudeHome": _TEST_HOME,
+                    "allowedTools": ["Bash", "Write", "WebFetch"],
+                }
+            },
         )
         assert agent._allowed_tools == ["Read", "Glob", "Grep", "Bash", "Write", "WebFetch"]
         assert agent._setting_sources == ["project"]
@@ -240,7 +250,13 @@ class TestFromDict:
         # User-specified Read/Grep overlap the defaults but must not duplicate.
         agent = ClaudeAgent.from_dict(
             "t",
-            {"provider": {"type": "anthropic", "allowedTools": ["Read", "Bash", "Grep", "Bash"]}},
+            {
+                "provider": {
+                    "type": "anthropic",
+                    "claudeHome": _TEST_HOME,
+                    "allowedTools": ["Read", "Bash", "Grep", "Bash"],
+                }
+            },
         )
         assert agent._allowed_tools == ["Read", "Glob", "Grep", "Bash"]
 
@@ -249,7 +265,7 @@ class TestFromDict:
         # only an auto-approval list. To actually block them, the unwanted ones must go
         # into disallowed_tools. With no user allowedTools, every built-in except the
         # read-only defaults (Read/Glob/Grep) should be blocked.
-        agent = ClaudeAgent.from_dict("t", {})
+        agent = ClaudeAgent.from_dict("t", {"provider": {"claudeHome": _TEST_HOME}})
         disallowed = set(agent._disallowed_tools)
         # Read/Glob/Grep must not be blocked — they are the baseline.
         assert {"Read", "Glob", "Grep"}.isdisjoint(disallowed)
@@ -260,7 +276,7 @@ class TestFromDict:
     def test_config_allowed_tools_drop_out_of_disallowed(self, stub_instructions, fake_query):  # noqa: ARG002
         agent = ClaudeAgent.from_dict(
             "t",
-            {"provider": {"type": "anthropic", "allowedTools": ["Bash", "Skill"]}},
+            {"provider": {"type": "anthropic", "claudeHome": _TEST_HOME, "allowedTools": ["Bash", "Skill"]}},
         )
         disallowed = set(agent._disallowed_tools)
         assert "Bash" not in disallowed
@@ -269,15 +285,30 @@ class TestFromDict:
         assert "Write" in disallowed
         assert "WebFetch" in disallowed
 
+    def test_claude_home_required_in_from_dict(self, stub_instructions, fake_query):  # noqa: ARG002
+        # Without claudeHome the CLI subprocess would inherit the host $HOME
+        # and read the user's personal ~/.claude.json (OAuth, MCP, projects).
+        # from_dict must refuse to build an agent in that state.
+        with pytest.raises(ValueError, match="claudeHome"):
+            ClaudeAgent.from_dict("t", {"provider": {"type": "anthropic"}})
+
+    def test_claude_home_from_config_captured(self, stub_instructions, fake_query):  # noqa: ARG002
+        agent = ClaudeAgent.from_dict(
+            "t",
+            {"provider": {"type": "anthropic", "claudeHome": "/opt/bot-home"}},
+        )
+        assert agent._claude_home == "/opt/bot-home"
+
     def test_mcp_local_server_transformed(self, stub_instructions, fake_query):  # noqa: ARG002
         config = {
+            "provider": {"claudeHome": _TEST_HOME},
             "mcp": {
                 "my-local": {
                     "type": "local",
                     "command": ["python", "-m", "srv"],
                     "environment": {"FOO": "bar"},
                 }
-            }
+            },
         }
         agent = ClaudeAgent.from_dict("t", config)
         srv = agent._mcp_servers["my-local"]
@@ -288,13 +319,14 @@ class TestFromDict:
 
     def test_mcp_remote_server_transformed(self, stub_instructions, fake_query):  # noqa: ARG002
         config = {
+            "provider": {"claudeHome": _TEST_HOME},
             "mcp": {
                 "my-remote": {
                     "type": "remote",
                     "url": "https://example.com/mcp",
                     "headers": {"Authorization": "Bearer x"},
                 }
-            }
+            },
         }
         agent = ClaudeAgent.from_dict("t", config)
         srv = agent._mcp_servers["my-remote"]
@@ -304,10 +336,11 @@ class TestFromDict:
 
     def test_mcp_disabled_server_skipped(self, stub_instructions, fake_query):  # noqa: ARG002
         config = {
+            "provider": {"claudeHome": _TEST_HOME},
             "mcp": {
                 "off": {"type": "local", "command": ["x"], "enabled": False},
                 "on": {"type": "local", "command": ["y"]},
-            }
+            },
         }
         agent = ClaudeAgent.from_dict("t", config)
         assert "off" not in agent._mcp_servers
@@ -321,7 +354,7 @@ class TestOptionsWiring:
             "t",
             {
                 "mcp": {"srv": {"type": "local", "command": ["x"]}},
-                "provider": {"type": "anthropic", "allowedTools": ["Bash", "WebFetch"]},
+                "provider": {"type": "anthropic", "claudeHome": _TEST_HOME, "allowedTools": ["Bash", "WebFetch"]},
             },
         )
         try:
@@ -340,8 +373,25 @@ class TestOptionsWiring:
         assert opts.setting_sources == ["project"]
 
     @pytest.mark.anyio
+    async def test_claude_home_flows_into_options_env(self, fake_query):
+        # The CLI subprocess must see HOME=<claude_home> so it reads the
+        # bot's isolated ~/.claude.json, not the host user's.
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home="/opt/bot-home")
+        try:
+            await agent.run("chat-1", "hi")
+        finally:
+            await agent.cleanup()
+        assert fake_query.calls[0].options.env.get("HOME") == "/opt/bot-home"
+
+    def test_constructor_rejects_missing_claude_home(self, fake_query):  # noqa: ARG002
+        # There is no implicit default — letting it fall back to the parent
+        # process $HOME would silently leak host OAuth/MCP/project state.
+        with pytest.raises(ValueError, match="claude_home"):
+            ClaudeAgent(name="t", instructions="sys", claude_home="")
+
+    @pytest.mark.anyio
     async def test_max_turns_flows_into_options(self, fake_query):
-        agent = ClaudeAgent(name="t", instructions="sys", max_turns=5)
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME, max_turns=5)
         try:
             await agent.run("chat-1", "hi")
         finally:
@@ -350,7 +400,7 @@ class TestOptionsWiring:
 
     @pytest.mark.anyio
     async def test_model_flows_into_options(self, fake_query):
-        agent = ClaudeAgent(name="t", instructions="sys", model_name="claude-sonnet-4-6")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME, model_name="claude-sonnet-4-6")
         try:
             await agent.run("chat-1", "hi")
         finally:
@@ -361,7 +411,7 @@ class TestOptionsWiring:
 class TestConnectCleanup:
     @pytest.mark.anyio
     async def test_connect_is_no_op(self, fake_query):  # noqa: ARG002
-        agent = ClaudeAgent(name="t", instructions="sys")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
         try:
             await agent.connect()  # must not raise
         finally:
@@ -369,7 +419,7 @@ class TestConnectCleanup:
 
     @pytest.mark.anyio
     async def test_cleanup_closes_mapping(self, fake_query):  # noqa: ARG002
-        agent = ClaudeAgent(name="t", instructions="sys")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
         await agent.cleanup()
         # After cleanup, the mapping DB connection is closed; further ops raise.
         with pytest.raises(Exception):  # noqa: B017
@@ -403,7 +453,7 @@ class TestEmptyStream:
         import logging
 
         fake_query.empty_stream = True
-        agent = ClaudeAgent(name="t", instructions="sys")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
         try:
             with caplog.at_level(logging.WARNING, logger="agent_core.anthropic_provider"):
                 result = await agent.run("chat-1", "hi")
@@ -415,7 +465,7 @@ class TestEmptyStream:
     @pytest.mark.anyio
     async def test_empty_stream_does_not_update_mapping(self, fake_query):
         fake_query.empty_stream = True
-        agent = ClaudeAgent(name="t", instructions="sys")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
         try:
             await agent.run("chat-1", "hi")
             assert agent._session_map.get("chat-1") is None
@@ -429,7 +479,7 @@ class TestConcurrency:
         """Two concurrent run() calls for the same chat_id must be serialized by
         the per-chat lock, so the second call sees the session_id stored by the first."""
         fake_query.session_id = "sess-shared"
-        agent = ClaudeAgent(name="t", instructions="sys")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
         try:
             results = await asyncio.gather(
                 agent.run("chat-1", "msg1"),
@@ -445,7 +495,7 @@ class TestConcurrency:
     async def test_concurrent_runs_different_chat_ids_run_independently(self, fake_query):
         """Different chat_ids must not block each other."""
         fake_query.session_id = "sess-x"
-        agent = ClaudeAgent(name="t", instructions="sys")
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
         try:
             results = await asyncio.gather(
                 agent.run("chat-A", "hi"),

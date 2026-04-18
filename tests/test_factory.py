@@ -37,7 +37,7 @@ class TestBuildAgent:
         assert isinstance(agent, OpenAIAgent)
 
     def test_anthropic_provider(self, stub_instructions):  # noqa: ARG002
-        agent = build_agent("t", {"provider": {"type": "anthropic"}})
+        agent = build_agent("t", {"provider": {"type": "anthropic", "claudeHome": "/tmp/agent-core-test-home"}})
         assert isinstance(agent, ClaudeAgent)
 
     def test_unknown_provider_type_raises(self, stub_instructions):  # noqa: ARG002

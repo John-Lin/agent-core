@@ -68,6 +68,7 @@ results.
 config = {
     "provider": {
         "type": "anthropic",
+        "claudeHome": "/app/claude-home",  # required; HOME for the CLI subprocess
         "model": "claude-sonnet-4-6",  # optional, default: SDK's default
         "allowedTools": ["Bash", "Write", "Edit"],  # optional; tools listed here are added on top of the read-only defaults
     },
@@ -123,6 +124,16 @@ Differences from the OpenAI provider:
   to produce the actual block list.
 - All tool execution happens locally in the CLI subprocess the SDK
   spawns — there is no hosted sandbox.
+- `provider.claudeHome` is **required**, with no fallback. It becomes
+  `HOME` for the CLI subprocess, so the CLI reads its own
+  `<claudeHome>/.claude.json` (OAuth state, MCP config, project
+  tracking, feature-flag cache) instead of the host user's
+  `~/.claude.json`. Without this the bot would run as whichever user
+  started the process — inheriting their Anthropic session, personal
+  MCP servers, and project history. Both `from_dict` and the
+  constructor raise `ValueError` if it is omitted. Point it at a
+  writable directory the bot owns; the CLI creates the file on first
+  run.
 
 ## Error handling
 
