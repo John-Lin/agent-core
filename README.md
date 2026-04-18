@@ -47,8 +47,9 @@ config = {
             "skillsDir": "/app/skills",  # optional path to SKILL.md skills
         },
     },
-    "mcpServers": {
+    "mcp": {
         "my-tool": {
+            "type": "remote",
             "url": "http://localhost:8000/mcp",
             "timeout": 30.0,
             "enabled": True,
@@ -70,13 +71,14 @@ config = {
         "model": "claude-sonnet-4-6",  # optional, default: SDK's default
         "allowedTools": ["Bash", "Read", "WebFetch"],  # optional; exact set of built-in tools to allow (duplicates dropped)
     },
-    "mcpServers": {
-        "my-stdio": {
-            "command": "python",
-            "args": ["-m", "srv"],
-            "env": {"FOO": "bar"},
+    "mcp": {
+        "my-local": {
+            "type": "local",
+            "command": ["python", "-m", "srv"],
+            "environment": {"FOO": "bar"},
         },
-        "my-http": {
+        "my-remote": {
+            "type": "remote",
             "url": "https://example.com/mcp",
             "headers": {"Authorization": "Bearer x"},
         },

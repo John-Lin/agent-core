@@ -257,11 +257,26 @@ class OpenAIAgent:
     @classmethod
     def from_dict(cls, name: str, config: dict[str, Any]) -> OpenAIAgent:
         mcp_servers: list[MCPServerStreamableHttp | MCPServerStdio] = []
-        for mcp_srv in config.get("mcpServers", {}).values():
+        for mcp_name, mcp_srv in config.get("mcp", {}).items():
             if not mcp_srv.get("enabled", True):
                 continue
             timeout = mcp_srv.get("timeout", MCP_SESSION_TIMEOUT_SECONDS)
-            if "url" in mcp_srv:
+            mcp_type = mcp_srv.get("type")
+            if mcp_type == "local":
+                command = mcp_srv.get("command")
+                if not isinstance(command, list) or not command:
+                    raise ValueError(f"MCP server {mcp_name!r}: 'command' must be a non-empty list")
+                mcp_servers.append(
+                    MCPServerStdio(
+                        client_session_timeout_seconds=timeout,
+                        params={
+                            "command": command[0],
+                            "args": command[1:],
+                            "env": mcp_srv.get("environment"),
+                        },
+                    )
+                )
+            elif mcp_type == "remote":
                 mcp_servers.append(
                     MCPServerStreamableHttp(
                         client_session_timeout_seconds=timeout,
@@ -272,15 +287,8 @@ class OpenAIAgent:
                     )
                 )
             else:
-                mcp_servers.append(
-                    MCPServerStdio(
-                        client_session_timeout_seconds=timeout,
-                        params={
-                            "command": mcp_srv["command"],
-                            "args": mcp_srv.get("args", []),
-                            "env": mcp_srv.get("env"),
-                        },
-                    )
+                raise ValueError(
+                    f"MCP server {mcp_name!r}: 'type' must be 'local' or 'remote', got {mcp_type!r}"
                 )
         provider_cfg = config.get("provider") or {}
         shell_cfg = provider_cfg.get("shell") or {}
