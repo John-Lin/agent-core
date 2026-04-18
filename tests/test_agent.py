@@ -25,40 +25,40 @@ from agents.models.interface import Model
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from agents.models.openai_responses import OpenAIResponsesModel
 
-from agent_core.agent import HISTORY_TURNS_DEFAULT
-from agent_core.agent import MCP_SESSION_TIMEOUT_SECONDS
-from agent_core.agent import OpenAIAgent
-from agent_core.agent import _get_model
-from agent_core.agent import _parse_skill_description
-from agent_core.agent import _shell_executor
-from agent_core.agent import _turn_truncate
+from agent_core.openai_provider import HISTORY_TURNS_DEFAULT
+from agent_core.openai_provider import MCP_SESSION_TIMEOUT_SECONDS
+from agent_core.openai_provider import OpenAIAgent
+from agent_core.openai_provider import _get_model
+from agent_core.openai_provider import _parse_skill_description
+from agent_core.openai_provider import _shell_executor
+from agent_core.openai_provider import _turn_truncate
 
 
 @pytest.fixture
 def _stub_instructions(monkeypatch):
     """Stub out instructions.md loading for from_dict tests."""
-    monkeypatch.setattr("agent_core.agent._load_instructions", lambda: "stub instructions")
+    monkeypatch.setattr("agent_core.openai_provider._load_instructions", lambda: "stub instructions")
 
 
 @pytest.fixture(autouse=True)
 def _mock_model(monkeypatch):
     """Prevent tests from constructing a real OpenAI client."""
-    monkeypatch.setattr("agent_core.agent._get_model", lambda model_name, api_type: create_autospec(Model))
+    monkeypatch.setattr("agent_core.openai_provider._get_model", lambda model_name, api_type: create_autospec(Model))
 
 
 class TestGetModel:
     def test_returns_responses_model_by_default(self):
-        with patch("agent_core.agent.AsyncOpenAI", return_value=MagicMock()):
+        with patch("agent_core.openai_provider.AsyncOpenAI", return_value=MagicMock()):
             model = _get_model("gpt-4o", "responses")
         assert isinstance(model, OpenAIResponsesModel)
 
     def test_returns_responses_model_when_api_type_is_responses(self):
-        with patch("agent_core.agent.AsyncOpenAI", return_value=MagicMock()):
+        with patch("agent_core.openai_provider.AsyncOpenAI", return_value=MagicMock()):
             model = _get_model("gpt-4o", "responses")
         assert isinstance(model, OpenAIResponsesModel)
 
     def test_returns_chat_completions_model_when_api_type_is_chat_completions(self):
-        with patch("agent_core.agent.AsyncOpenAI", return_value=MagicMock()):
+        with patch("agent_core.openai_provider.AsyncOpenAI", return_value=MagicMock()):
             model = _get_model("gpt-4o", "chat_completions")
         assert isinstance(model, OpenAIChatCompletionsModel)
 
@@ -73,11 +73,11 @@ class TestFromDictModel:
             captured["api_type"] = api_type
             return create_autospec(Model)
 
-        with patch("agent_core.agent._get_model", side_effect=fake_get_model):
+        with patch("agent_core.openai_provider._get_model", side_effect=fake_get_model):
             OpenAIAgent.from_dict("test", {"mcpServers": {}})
 
-        from agent_core.agent import OPENAI_API_TYPE_DEFAULT
-        from agent_core.agent import OPENAI_MODEL_DEFAULT
+        from agent_core.openai_provider import OPENAI_API_TYPE_DEFAULT
+        from agent_core.openai_provider import OPENAI_MODEL_DEFAULT
 
         assert captured["model_name"] == OPENAI_MODEL_DEFAULT
         assert captured["api_type"] == OPENAI_API_TYPE_DEFAULT
@@ -90,7 +90,7 @@ class TestFromDictModel:
             captured["api_type"] = api_type
             return create_autospec(Model)
 
-        with patch("agent_core.agent._get_model", side_effect=fake_get_model):
+        with patch("agent_core.openai_provider._get_model", side_effect=fake_get_model):
             OpenAIAgent.from_dict(
                 "test",
                 {"mcpServers": {}, "provider": {"type": "openai", "model": "gpt-4o-mini"}},
@@ -106,7 +106,7 @@ class TestFromDictModel:
             captured["api_type"] = api_type
             return create_autospec(Model)
 
-        with patch("agent_core.agent._get_model", side_effect=fake_get_model):
+        with patch("agent_core.openai_provider._get_model", side_effect=fake_get_model):
             OpenAIAgent.from_dict(
                 "test",
                 {"mcpServers": {}, "provider": {"type": "openai", "apiType": "chat_completions"}},
@@ -385,7 +385,7 @@ class TestFromDictHistoryTurns:
             ]
         await session.add_items(history)
 
-        with patch("agent_core.agent.Runner.run", side_effect=fake_run):
+        with patch("agent_core.openai_provider.Runner.run", side_effect=fake_run):
             await agent.run(chat_id=1, message="new")
 
         sent = captured_inputs[0]
@@ -441,7 +441,7 @@ class TestRunWithSession:
         async def fake_run(ag, input, **kw):
             return self._make_run_result(input, reply="hello")
 
-        with patch("agent_core.agent.Runner.run", side_effect=fake_run):
+        with patch("agent_core.openai_provider.Runner.run", side_effect=fake_run):
             result = await agent.run(chat_id=1, message="hi")
 
         assert result == "hello"
@@ -455,7 +455,7 @@ class TestRunWithSession:
             input_sent.extend(input)
             return self._make_run_result(input, reply="pong")
 
-        with patch("agent_core.agent.Runner.run", side_effect=fake_run):
+        with patch("agent_core.openai_provider.Runner.run", side_effect=fake_run):
             await agent.run(chat_id=1, message="ping")
 
         session = agent._get_session(1)
@@ -470,7 +470,7 @@ class TestRunWithSession:
         async def fake_run(ag, input, **kw):
             return self._make_run_result(input, reply="reply")
 
-        with patch("agent_core.agent.Runner.run", side_effect=fake_run):
+        with patch("agent_core.openai_provider.Runner.run", side_effect=fake_run):
             await agent.run(chat_id=100, message="from 100")
             await agent.run(chat_id=200, message="from 200")
 
@@ -498,7 +498,7 @@ class TestRunWithSession:
             ]
         await session.add_items(history)
 
-        with patch("agent_core.agent.Runner.run", side_effect=fake_run):
+        with patch("agent_core.openai_provider.Runner.run", side_effect=fake_run):
             await agent.run(chat_id=1, message="new")
 
         sent = captured_inputs[0]
@@ -538,7 +538,7 @@ class TestRunErrorMapping:
         async def boom(ag, input, **kw):
             raise exc
 
-        with patch("agent_core.agent.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
+        with patch("agent_core.openai_provider.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
             await agent.run(chat_id=1, message="hi")
         assert exc_info.value.subtype == expected_subtype
         assert exc_info.value.provider == "openai"
@@ -566,7 +566,7 @@ class TestRunErrorMapping:
         async def boom(ag, input, **kw):
             raise self._api_status_exc(exc_cls)
 
-        with patch("agent_core.agent.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
+        with patch("agent_core.openai_provider.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
             await agent.run(chat_id=1, message="hi")
         assert exc_info.value.subtype == expected_subtype
         assert exc_info.value.provider == "openai"
@@ -582,7 +582,7 @@ class TestRunErrorMapping:
         async def boom(ag, input, **kw):
             raise openai.APITimeoutError(request=MagicMock())
 
-        with patch("agent_core.agent.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
+        with patch("agent_core.openai_provider.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
             await agent.run(chat_id=1, message="hi")
         assert exc_info.value.subtype == "timeout"
         assert exc_info.value.provider == "openai"
@@ -598,7 +598,7 @@ class TestRunErrorMapping:
         async def boom(ag, input, **kw):
             raise openai.APIConnectionError(request=MagicMock())
 
-        with patch("agent_core.agent.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
+        with patch("agent_core.openai_provider.Runner.run", side_effect=boom), pytest.raises(AgentError) as exc_info:
             await agent.run(chat_id=1, message="hi")
         assert exc_info.value.subtype == "connection"
         assert exc_info.value.provider == "openai"
@@ -610,7 +610,7 @@ class TestRunErrorMapping:
         async def boom(ag, input, **kw):
             raise RuntimeError("???")
 
-        with patch("agent_core.agent.Runner.run", side_effect=boom), pytest.raises(RuntimeError):
+        with patch("agent_core.openai_provider.Runner.run", side_effect=boom), pytest.raises(RuntimeError):
             await agent.run(chat_id=1, message="hi")
 
 

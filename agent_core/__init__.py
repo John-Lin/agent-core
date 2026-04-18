@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from .agent import OpenAIAgent
+from .anthropic_provider import ClaudeAgent
 from .base import AIAgent
-from .claude import ClaudeAgent
 from .errors import AgentError
+from .openai_provider import OpenAIAgent
 
 __all__ = ["AIAgent", "AgentError", "ClaudeAgent", "OpenAIAgent", "build_agent"]
 

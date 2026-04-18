@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from agent_core.claude import ClaudeAgent
+from agent_core.anthropic_provider import ClaudeAgent
 
 pytestmark = pytest.mark.skipif(
     not os.getenv("ANTHROPIC_API_KEY"),

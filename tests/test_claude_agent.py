@@ -13,7 +13,7 @@ from claude_agent_sdk import ResultMessage
 from claude_agent_sdk import TextBlock
 
 from agent_core import AgentError
-from agent_core.claude import ClaudeAgent
+from agent_core.anthropic_provider import ClaudeAgent
 
 
 @dataclass
@@ -61,7 +61,7 @@ class FakeQuery:
 
 @pytest.fixture
 def stub_instructions(monkeypatch):
-    monkeypatch.setattr("agent_core.claude._load_instructions", lambda: "stub instructions")
+    monkeypatch.setattr("agent_core.anthropic_provider._load_instructions", lambda: "stub instructions")
 
 
 @pytest.fixture(autouse=True)
@@ -72,7 +72,7 @@ def _isolate_env(monkeypatch):
 @pytest.fixture
 def fake_query(monkeypatch):
     fq = FakeQuery()
-    monkeypatch.setattr("agent_core.claude.query", fq)
+    monkeypatch.setattr("agent_core.anthropic_provider.query", fq)
     return fq
 
 
@@ -347,7 +347,7 @@ class TestConnectCleanup:
 class TestMcpTransform:
     def test_malformed_server_raises_value_error(self, fake_query):  # noqa: ARG002
         """A config entry with neither 'url' nor 'command' must raise a clear error."""
-        from agent_core.claude import _transform_mcp_servers
+        from agent_core.anthropic_provider import _transform_mcp_servers
 
         with pytest.raises(ValueError, match="must have either"):
             _transform_mcp_servers({"bad": {"enabled": True}})
@@ -362,7 +362,7 @@ class TestEmptyStream:
         fake_query.empty_stream = True
         agent = ClaudeAgent(name="t", instructions="sys")
         try:
-            with caplog.at_level(logging.WARNING, logger="agent_core.claude"):
+            with caplog.at_level(logging.WARNING, logger="agent_core.anthropic_provider"):
                 result = await agent.run("chat-1", "hi")
         finally:
             await agent.cleanup()
