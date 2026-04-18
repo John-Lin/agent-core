@@ -95,9 +95,9 @@ Differences from the OpenAI provider:
   user's `~/.claude/` (personal MCP servers, skills, subagents, slash
   commands) is **never** inherited — otherwise a bot would silently
   run with whatever the server's user has configured.
-- `SHELL_ENABLED` enables the read-only toolset plus `Bash`. Extra
-  tools (e.g. `WebFetch`, `Write`, `Edit`) go in
-  `config["provider"]["allowedTools"]`.
+- There is no implicit shell toolset. List exactly the tools you want
+  in `config["provider"]["allowedTools"]` (e.g. `["Bash", "Read",
+  "Glob", "Grep", "WebFetch"]`).
 - All tool execution happens locally in the CLI subprocess the SDK
   spawns — there is no hosted sandbox.
 
@@ -146,6 +146,13 @@ wrapper only normalizes known provider failures.
 | `OPENAI_API_KEY` | ✓ | | OpenAI / Azure OpenAI v1 key |
 | `OPENAI_BASE_URL` | ✓ | | Optional, for Azure or compatible endpoints |
 | `ANTHROPIC_API_KEY` | | ✓ | Anthropic key (consumed by `claude-agent-sdk`) |
-| `SHELL_ENABLED` | ✓ | ✓ | Truthy to attach shell tools (OpenAI: `ShellTool`; Anthropic: `Bash`/`Read`/`Glob`/`Grep` + project skills) |
-| `SHELL_SKILLS_DIR` | ✓ | | OpenAI-only: directory of `SKILL.md` skills to mount on `ShellTool` |
 | `SESSION_DB_PATH` | ✓ | ✓ | SQLite path. OpenAI: conversation history. Anthropic: `chat_id -> session_id` mapping. Default: in-memory |
+| `AGENT_INSTRUCTIONS_PATH` | ✓ | ✓ | Override path to the instructions file. Default: `./instructions.md` |
+
+Shell tool configuration is now per-provider config, not env vars:
+
+- **OpenAI**: `provider.shell.enabled` (bool, default `false`) attaches
+  a local `ShellTool`. `provider.shell.skillsDir` (path) mounts
+  `SKILL.md` skills discovered under it.
+- **Anthropic**: list built-in tools explicitly in
+  `provider.allowedTools` (e.g. `["Bash", "Read", "Glob", "Grep"]`).

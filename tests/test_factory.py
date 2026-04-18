@@ -15,7 +15,6 @@ def stub_instructions(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch):
-    monkeypatch.delenv("SHELL_ENABLED", raising=False)
     monkeypatch.delenv("SESSION_DB_PATH", raising=False)
 
 

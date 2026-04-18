@@ -66,7 +66,6 @@ def stub_instructions(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch):
-    monkeypatch.delenv("SHELL_ENABLED", raising=False)
     monkeypatch.delenv("SESSION_DB_PATH", raising=False)
 
 
@@ -217,7 +216,7 @@ class TestFromDict:
         agent = ClaudeAgent.from_dict("t", {})
         assert agent._max_turns is None
 
-    def test_shell_disabled_yields_no_allowed_tools(self, stub_instructions, fake_query):  # noqa: ARG002
+    def test_no_allowed_tools_by_default(self, stub_instructions, fake_query):  # noqa: ARG002
         agent = ClaudeAgent.from_dict("t", {})
         assert agent._allowed_tools == []
 
@@ -229,28 +228,13 @@ class TestFromDict:
         agent = ClaudeAgent(name="t", instructions="sys")
         assert agent._setting_sources == ["project"]
 
-    def test_shell_enabled_allows_read_only_plus_bash(self, stub_instructions, fake_query, monkeypatch):  # noqa: ARG002
-        monkeypatch.setenv("SHELL_ENABLED", "1")
-        agent = ClaudeAgent.from_dict("t", {})
-        assert set(agent._allowed_tools) == {"Bash", "Read", "Glob", "Grep"}
+    def test_config_allowed_tools_applied(self, stub_instructions, fake_query):  # noqa: ARG002
+        agent = ClaudeAgent.from_dict(
+            "t",
+            {"provider": {"type": "anthropic", "allowedTools": ["Bash", "Read", "WebFetch"]}},
+        )
+        assert agent._allowed_tools == ["Bash", "Read", "WebFetch"]
         assert agent._setting_sources == ["project"]
-
-    def test_config_allowed_tools_extend_defaults(self, stub_instructions, fake_query, monkeypatch):  # noqa: ARG002
-        monkeypatch.setenv("SHELL_ENABLED", "1")
-        agent = ClaudeAgent.from_dict(
-            "t",
-            {"provider": {"type": "anthropic", "allowedTools": ["WebFetch", "Write"]}},
-        )
-        assert "WebFetch" in agent._allowed_tools
-        assert "Write" in agent._allowed_tools
-        assert "Bash" in agent._allowed_tools  # base kept
-
-    def test_config_allowed_tools_without_shell_still_applied(self, stub_instructions, fake_query):  # noqa: ARG002
-        agent = ClaudeAgent.from_dict(
-            "t",
-            {"provider": {"type": "anthropic", "allowedTools": ["WebFetch"]}},
-        )
-        assert agent._allowed_tools == ["WebFetch"]
 
     def test_mcp_stdio_server_transformed(self, stub_instructions, fake_query):  # noqa: ARG002
         config = {
@@ -298,13 +282,12 @@ class TestFromDict:
 
 class TestOptionsWiring:
     @pytest.mark.anyio
-    async def test_mcp_and_tools_flow_into_options(self, stub_instructions, fake_query, monkeypatch):  # noqa: ARG002
-        monkeypatch.setenv("SHELL_ENABLED", "1")
+    async def test_mcp_and_tools_flow_into_options(self, stub_instructions, fake_query):  # noqa: ARG002
         agent = ClaudeAgent.from_dict(
             "t",
             {
                 "mcpServers": {"srv": {"command": "x"}},
-                "provider": {"type": "anthropic", "allowedTools": ["WebFetch"]},
+                "provider": {"type": "anthropic", "allowedTools": ["Bash", "WebFetch"]},
             },
         )
         try:

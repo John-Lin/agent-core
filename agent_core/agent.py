@@ -32,7 +32,6 @@ from agents.models.openai_responses import OpenAIResponsesModel
 from agents.tracing import set_tracing_disabled
 from openai import AsyncOpenAI
 
-from .env import env_flag
 from .errors import AgentError
 from .instructions import _load_instructions
 
@@ -150,33 +149,32 @@ def _load_shell_skills(skills_dir: Path) -> list[ShellToolLocalSkill]:
     return skills
 
 
-def _get_shell_environment() -> ShellToolLocalEnvironment | None:
+def _get_shell_environment(enabled: bool, skills_dir: str | None) -> ShellToolLocalEnvironment | None:
     """Return the configured local shell environment, if enabled.
 
-    Controlled by two independent environment variables:
+    Driven by OpenAI ``provider.shell`` config:
 
-    * ``SHELL_ENABLED`` — when truthy, the ``ShellTool`` is attached to the agent.
-    * ``SHELL_SKILLS_DIR`` — optional path; when set, skills discovered under it
-      are mounted alongside the shell. Ignored if ``SHELL_ENABLED`` is not set.
+    * ``enabled`` — when true, the ``ShellTool`` is attached to the agent.
+    * ``skills_dir`` — optional path; when set, skills discovered under it
+      are mounted alongside the shell. Ignored if ``enabled`` is false.
     """
-    skills_dir_env = os.getenv("SHELL_SKILLS_DIR")
-    if not env_flag("SHELL_ENABLED"):
-        if skills_dir_env:
+    if not enabled:
+        if skills_dir:
             logging.warning(
-                "SHELL_SKILLS_DIR=%r is set but SHELL_ENABLED is not; ignoring skills dir.",
-                skills_dir_env,
+                "provider.shell.skillsDir=%r is set but provider.shell.enabled is false; ignoring skills dir.",
+                skills_dir,
             )
         return None
 
     environment: ShellToolLocalEnvironment = {"type": "local"}
-    if skills_dir_env:
-        skills = _load_shell_skills(Path(skills_dir_env))
+    if skills_dir:
+        skills = _load_shell_skills(Path(skills_dir))
         if skills:
             environment["skills"] = skills
         else:
             logging.warning(
-                "SHELL_SKILLS_DIR=%r yielded no skills; attaching bare local shell.",
-                skills_dir_env,
+                "provider.shell.skillsDir=%r yielded no skills; attaching bare local shell.",
+                skills_dir,
             )
     return environment
 
@@ -284,14 +282,18 @@ class OpenAIAgent:
                         },
                     )
                 )
+        provider_cfg = config.get("provider") or {}
+        shell_cfg = provider_cfg.get("shell") or {}
         tools: list[Any] = []
-        environment = _get_shell_environment()
+        environment = _get_shell_environment(
+            enabled=bool(shell_cfg.get("enabled", False)),
+            skills_dir=shell_cfg.get("skillsDir"),
+        )
         if environment is not None:
             tools.append(ShellTool(executor=_shell_executor, environment=environment))
 
         instructions = _load_instructions()
         db_path = os.getenv("SESSION_DB_PATH", ":memory:")
-        provider_cfg = config.get("provider") or {}
         history_turns = provider_cfg.get("historyTurns", HISTORY_TURNS_DEFAULT)
         model_name = provider_cfg.get("model", OPENAI_MODEL_DEFAULT)
         api_type = provider_cfg.get("apiType", OPENAI_API_TYPE_DEFAULT)
