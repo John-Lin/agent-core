@@ -285,6 +285,27 @@ class TestFromDict:
         assert "Write" in disallowed
         assert "WebFetch" in disallowed
 
+    def test_constructor_applies_default_allowed_tools(self, fake_query):  # noqa: ARG002
+        # The read-only baseline (Read/Glob/Grep) is a ClaudeAgent invariant,
+        # not a from_dict convenience. Callers using the constructor directly
+        # must also get it — otherwise someone wiring the agent without the
+        # factory gets a silently less-safe default than the README promises.
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
+        assert agent._allowed_tools == ["Read", "Glob", "Grep"]
+
+    def test_constructor_allowed_tools_extend_defaults(self, fake_query):  # noqa: ARG002
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME, allowed_tools=["Bash", "Write"])
+        assert agent._allowed_tools == ["Read", "Glob", "Grep", "Bash", "Write"]
+
+    def test_constructor_default_disallowed_blocks_non_readonly_builtins(self, fake_query):  # noqa: ARG002
+        # Same invariant as test_default_disallowed_tools_block_all_non_readonly_builtins,
+        # but verified for direct constructor use rather than from_dict.
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
+        disallowed = set(agent._disallowed_tools)
+        assert {"Read", "Glob", "Grep"}.isdisjoint(disallowed)
+        for name in ("Bash", "Write", "Edit", "WebFetch", "Skill"):
+            assert name in disallowed, f"{name} must be in disallowed_tools by default"
+
     def test_claude_home_required_in_from_dict(self, stub_instructions, fake_query):  # noqa: ARG002
         # Without claudeHome the CLI subprocess would inherit the host $HOME
         # and read the user's personal ~/.claude.json (OAuth, MCP, projects).

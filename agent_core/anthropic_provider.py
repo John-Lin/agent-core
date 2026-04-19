@@ -139,7 +139,11 @@ class ClaudeAgent:
         self.name = name
         self._instructions = instructions
         self._mcp_servers = mcp_servers if mcp_servers is not None else {}
-        self._allowed_tools = allowed_tools if allowed_tools is not None else []
+        # DEFAULT_ALLOWED_TOOLS is the read-only baseline every ClaudeAgent must
+        # expose (Read/Glob/Grep). Merging here, not in from_dict, means direct
+        # constructor callers also get the invariant the README promises.
+        caller_tools = allowed_tools if allowed_tools is not None else []
+        self._allowed_tools = list(dict.fromkeys(DEFAULT_ALLOWED_TOOLS + list(caller_tools)))
         if disallowed_tools is None:
             disallowed_tools = sorted(KNOWN_BUILTIN_TOOLS - set(self._allowed_tools))
         self._disallowed_tools = disallowed_tools
@@ -155,8 +159,7 @@ class ClaudeAgent:
         mcp_servers = _transform_mcp_servers(config.get("mcp", {}))
 
         provider_cfg = config.get("provider") or {}
-        tools: list[str] = list(dict.fromkeys(DEFAULT_ALLOWED_TOOLS + list(provider_cfg.get("allowedTools", []))))
-        disallowed: list[str] = sorted(KNOWN_BUILTIN_TOOLS - set(tools))
+        tools: list[str] = list(provider_cfg.get("allowedTools", []))
         claude_home = provider_cfg.get("claudeHome")
         if not claude_home:
             raise ValueError(
@@ -179,7 +182,6 @@ class ClaudeAgent:
             instructions=instructions,
             mcp_servers=mcp_servers,
             allowed_tools=tools,
-            disallowed_tools=disallowed,
             db_path=db_path,
             model_name=model_name,
             setting_sources=setting_sources,
