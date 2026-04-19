@@ -525,3 +525,79 @@ class TestConcurrency:
         finally:
             await agent.cleanup()
         assert results == ["hello", "hello"]
+
+
+class TestQueryTimeout:
+    """A hung CLI subprocess would otherwise hold the per-chat asyncio.Lock
+    forever — every subsequent message for that chat would pile up on the
+    lock and silently fail to produce a reply. Wrapping ``query`` in an
+    ``asyncio.timeout`` bounds the wait and surfaces the failure as an
+    AgentError the transport can report to the user.
+    """
+
+    @staticmethod
+    def _hang_query(*, prompt, options):  # noqa: ARG004
+        async def _gen():
+            await asyncio.Event().wait()
+            # Unreachable; the ``yield`` keeps _gen an async generator.
+            if False:  # pragma: no cover
+                yield
+
+        return _gen()
+
+    @pytest.mark.anyio
+    async def test_hanging_query_raises_timeout_agent_error(self, monkeypatch):
+        monkeypatch.setattr("agent_core.anthropic_provider.query", self._hang_query)
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME, query_timeout_s=0.05)
+        try:
+            with pytest.raises(AgentError) as exc_info:
+                await agent.run("chat-1", "hi")
+        finally:
+            await agent.cleanup()
+        assert exc_info.value.subtype == "timeout"
+        assert exc_info.value.provider == "anthropic"
+
+    @pytest.mark.anyio
+    async def test_timeout_releases_per_chat_lock(self, monkeypatch):
+        # The critical invariant: after a timeout the chat's lock must be
+        # released so subsequent messages are not wedged behind it.
+        monkeypatch.setattr("agent_core.anthropic_provider.query", self._hang_query)
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME, query_timeout_s=0.05)
+        try:
+            with pytest.raises(AgentError):
+                await agent.run("chat-1", "hi")
+            assert not agent._locks["chat-1"].locked()
+        finally:
+            await agent.cleanup()
+
+    @pytest.mark.anyio
+    async def test_default_timeout_is_five_minutes(self, fake_query):  # noqa: ARG002
+        # A sane production default. Long enough for any legitimate tool run,
+        # short enough that a hang fails the turn within a single oncall window.
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME)
+        try:
+            assert agent._query_timeout_s == 300.0
+        finally:
+            await agent.cleanup()
+
+    @pytest.mark.anyio
+    async def test_timeout_none_disables_limit(self, fake_query):  # noqa: ARG002
+        # Escape hatch for long-running backfills or debugging. ``asyncio.timeout(None)``
+        # is a documented no-op, so a non-hanging query must still return cleanly.
+        agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME, query_timeout_s=None)
+        try:
+            result = await agent.run("chat-1", "hi")
+        finally:
+            await agent.cleanup()
+        assert result == "hello"
+
+    def test_from_dict_reads_timeout_from_config(self, stub_instructions, fake_query):  # noqa: ARG002
+        agent = ClaudeAgent.from_dict(
+            "t",
+            {"provider": {"type": "anthropic", "claudeHome": _TEST_HOME, "queryTimeoutSeconds": 42.0}},
+        )
+        assert agent._query_timeout_s == 42.0
+
+    def test_from_dict_timeout_default_is_five_minutes(self, stub_instructions, fake_query):  # noqa: ARG002
+        agent = ClaudeAgent.from_dict("t", {"provider": {"claudeHome": _TEST_HOME}})
+        assert agent._query_timeout_s == 300.0

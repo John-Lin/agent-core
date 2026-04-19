@@ -71,6 +71,7 @@ config = {
         "claudeHome": "/app/claude-home",  # required; HOME for the CLI subprocess
         "model": "claude-sonnet-4-6",  # optional, default: SDK's default
         "allowedTools": ["Bash", "Write", "Edit"],  # optional; tools listed here are added on top of the read-only defaults
+        "queryTimeoutSeconds": 300.0,  # optional, default: 300. Set to null to disable.
     },
     "mcp": {
         "my-local": {
@@ -124,6 +125,13 @@ Differences from the OpenAI provider:
   to produce the actual block list.
 - All tool execution happens locally in the CLI subprocess the SDK
   spawns — there is no hosted sandbox.
+- `claude-agent-sdk` does not expose a per-query timeout, so each call
+  is wrapped in `asyncio.timeout(queryTimeoutSeconds)` (default `300`).
+  Without this, a hung CLI subprocess would permanently hold the
+  per-chat `asyncio.Lock` and silently wedge that conversation. A
+  timeout surfaces as `AgentError(subtype="timeout", provider="anthropic")`
+  and releases the lock so the next message starts a fresh session.
+  Set to `null` to disable.
 - `provider.claudeHome` is **required**, with no fallback. It becomes
   `HOME` for the CLI subprocess, so the CLI reads its own
   `<claudeHome>/.claude.json` (OAuth state, MCP config, project
@@ -160,7 +168,7 @@ except AgentError as e:
 | `rate_limit` | `openai.RateLimitError` | — (surfaces via `is_error`) |
 | `auth` | `openai.AuthenticationError` | — |
 | `bad_request` | `openai.BadRequestError` | — |
-| `timeout` | `openai.APITimeoutError` | — |
+| `timeout` | `openai.APITimeoutError` | `asyncio.timeout` wrapping `query()` |
 | `connection` | `openai.APIConnectionError` | — |
 | `api_status` | other `openai.APIStatusError` | — |
 | `model_behavior` | `agents.ModelBehaviorError` | — |

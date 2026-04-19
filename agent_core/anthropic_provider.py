@@ -22,6 +22,13 @@ from .session_map import ClaudeSessionMap
 # listed explicitly by the caller.
 DEFAULT_ALLOWED_TOOLS = ["Read", "Glob", "Grep"]
 
+# Upper bound on a single query's wall-clock time. claude-agent-sdk exposes
+# no per-query timeout, so without this the CLI subprocess can hang and
+# permanently hold the per-chat asyncio.Lock — every subsequent message
+# for that chat piles up invisibly. 5 minutes comfortably covers legitimate
+# tool runs while still failing within one oncall window on a real hang.
+DEFAULT_QUERY_TIMEOUT_S = 300.0
+
 # Every Claude Code built-in tool name known to us at the time of writing.
 # Kept in sync with https://code.claude.com/docs/en/tools-reference — revisit
 # when bumping claude-agent-sdk in case new tools have been added.
@@ -125,6 +132,7 @@ class ClaudeAgent:
         max_turns: int | None = None,
         model_name: str | None = None,
         setting_sources: list[str] | None = None,
+        query_timeout_s: float | None = DEFAULT_QUERY_TIMEOUT_S,
     ) -> None:
         if not claude_home:
             # Required unconditionally — without it the CLI subprocess falls
@@ -151,6 +159,7 @@ class ClaudeAgent:
         self._model_name = model_name
         self._max_turns = max_turns
         self._setting_sources = setting_sources if setting_sources is not None else ["project"]
+        self._query_timeout_s = query_timeout_s
         self._session_map = ClaudeSessionMap(db_path)
         self._locks: dict[Hashable, asyncio.Lock] = {}
 
@@ -176,6 +185,7 @@ class ClaudeAgent:
         instructions = _load_instructions()
         db_path = os.getenv("SESSION_DB_PATH", ":memory:")
         model_name = provider_cfg.get("model")
+        query_timeout_s = provider_cfg.get("queryTimeoutSeconds", DEFAULT_QUERY_TIMEOUT_S)
 
         return cls(
             name,
@@ -186,6 +196,7 @@ class ClaudeAgent:
             model_name=model_name,
             setting_sources=setting_sources,
             claude_home=claude_home,
+            query_timeout_s=query_timeout_s,
         )
 
     async def connect(self) -> None:
@@ -216,18 +227,29 @@ class ClaudeAgent:
             )
             final_text = ""
             captured_session_id: str | None = None
-            async for msg in query(prompt=message, options=options):
-                if isinstance(msg, ResultMessage):
-                    captured_session_id = msg.session_id
-                    if msg.is_error:
-                        raise AgentError(
-                            msg.result or "claude-agent-sdk returned is_error=True",
-                            subtype=msg.subtype,
-                            provider="anthropic",
-                            session_id=msg.session_id,
-                        )
-                    if msg.result is not None:
-                        final_text = msg.result
+            try:
+                async with asyncio.timeout(self._query_timeout_s):
+                    async for msg in query(prompt=message, options=options):
+                        if isinstance(msg, ResultMessage):
+                            captured_session_id = msg.session_id
+                            if msg.is_error:
+                                raise AgentError(
+                                    msg.result or "claude-agent-sdk returned is_error=True",
+                                    subtype=msg.subtype,
+                                    provider="anthropic",
+                                    session_id=msg.session_id,
+                                )
+                            if msg.result is not None:
+                                final_text = msg.result
+            except TimeoutError as e:
+                # No ResultMessage arrived, so we have no session_id to persist.
+                # The next message for this chat will start a fresh SDK session
+                # rather than resume a partially-completed one.
+                raise AgentError(
+                    f"claude-agent-sdk query timed out after {self._query_timeout_s}s",
+                    subtype="timeout",
+                    provider="anthropic",
+                ) from e
             if captured_session_id is None:
                 logging.warning(
                     "claude-agent-sdk query() ended with no ResultMessage for chat_id=%r",
