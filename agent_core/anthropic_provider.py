@@ -79,6 +79,26 @@ KNOWN_BUILTIN_TOOLS = frozenset(
 )
 
 
+def _validate_environment(raw: Any) -> dict[str, str] | None:
+    """Validate ``provider.environment`` from config.
+
+    Subprocess env entries must be strings; coercing silently would mask
+    config typos and surface as confusing CLI errors downstream.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("provider.environment must be a mapping of string to string")
+    out: dict[str, str] = {}
+    for k, v in raw.items():
+        if not isinstance(k, str) or not isinstance(v, str):
+            raise ValueError(
+                f"provider.environment[{k!r}] must be a string, got {type(v).__name__}"
+            )
+        out[k] = v
+    return out
+
+
 def _transform_mcp_servers(raw: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Convert the shared opencode-style ``mcp`` config to claude-agent-sdk format.
 
@@ -133,6 +153,7 @@ class ClaudeAgent:
         model_name: str | None = None,
         setting_sources: list[str] | None = None,
         query_timeout_s: float | None = DEFAULT_QUERY_TIMEOUT_S,
+        environment: dict[str, str] | None = None,
     ) -> None:
         if not claude_home:
             # Required unconditionally — without it the CLI subprocess falls
@@ -160,6 +181,7 @@ class ClaudeAgent:
         self._max_turns = max_turns
         self._setting_sources = setting_sources if setting_sources is not None else ["project"]
         self._query_timeout_s = query_timeout_s
+        self._environment = dict(environment) if environment else {}
         self._session_map = ClaudeSessionMap(db_path)
         self._locks: dict[Hashable, asyncio.Lock] = {}
 
@@ -186,6 +208,7 @@ class ClaudeAgent:
         db_path = os.getenv("SESSION_DB_PATH", ":memory:")
         model_name = provider_cfg.get("model")
         query_timeout_s = provider_cfg.get("queryTimeoutSeconds", DEFAULT_QUERY_TIMEOUT_S)
+        environment = _validate_environment(provider_cfg.get("environment"))
 
         return cls(
             name,
@@ -197,6 +220,7 @@ class ClaudeAgent:
             setting_sources=setting_sources,
             claude_home=claude_home,
             query_timeout_s=query_timeout_s,
+            environment=environment,
         )
 
     async def connect(self) -> None:
@@ -208,8 +232,10 @@ class ClaudeAgent:
             resume_id = self._session_map.get(chat_id)
             # Overriding HOME redirects the CLI subprocess from the host
             # user's ~/.claude.json (OAuth, projects, personal MCP) to an
-            # isolated directory owned by this agent.
-            env = {"HOME": self._claude_home}
+            # isolated directory owned by this agent. HOME is applied last
+            # so caller-provided environment cannot break the isolation
+            # invariant by redirecting it back at the host user.
+            env = {**self._environment, "HOME": self._claude_home}
             options = ClaudeAgentOptions(
                 system_prompt=self._instructions,
                 # cast: SDK stub types mcp_servers as a union of specific TypedDicts,

@@ -411,6 +411,77 @@ class TestOptionsWiring:
             ClaudeAgent(name="t", instructions="sys", claude_home="")
 
     @pytest.mark.anyio
+    async def test_environment_flows_into_options_env(self, fake_query):
+        # Caller-provided env (e.g. CLAUDE_CODE_USE_BEDROCK=1, AWS_REGION=...)
+        # must reach the CLI subprocess so it can pick a non-default backend.
+        agent = ClaudeAgent(
+            name="t",
+            instructions="sys",
+            claude_home=_TEST_HOME,
+            environment={"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": "us-east-1"},
+        )
+        try:
+            await agent.run("chat-1", "hi")
+        finally:
+            await agent.cleanup()
+        env = fake_query.calls[0].options.env
+        assert env.get("CLAUDE_CODE_USE_BEDROCK") == "1"
+        assert env.get("AWS_REGION") == "us-east-1"
+
+    @pytest.mark.anyio
+    async def test_environment_cannot_override_home(self, fake_query):
+        # HOME isolation is a security invariant — caller env must not be
+        # able to redirect the CLI back to the host user's ~/.claude.json.
+        agent = ClaudeAgent(
+            name="t",
+            instructions="sys",
+            claude_home="/opt/bot-home",
+            environment={"HOME": "/tmp/attacker"},
+        )
+        try:
+            await agent.run("chat-1", "hi")
+        finally:
+            await agent.cleanup()
+        assert fake_query.calls[0].options.env.get("HOME") == "/opt/bot-home"
+
+    @pytest.mark.anyio
+    async def test_from_dict_reads_provider_environment(self, stub_instructions, fake_query):  # noqa: ARG002
+        agent = ClaudeAgent.from_dict(
+            "t",
+            {
+                "provider": {
+                    "claudeHome": _TEST_HOME,
+                    "environment": {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": "us-east-1"},
+                }
+            },
+        )
+        try:
+            await agent.run("chat-1", "hi")
+        finally:
+            await agent.cleanup()
+        env = fake_query.calls[0].options.env
+        assert env.get("CLAUDE_CODE_USE_BEDROCK") == "1"
+        assert env.get("AWS_REGION") == "us-east-1"
+
+    def test_from_dict_rejects_non_string_environment_values(self, stub_instructions, fake_query):  # noqa: ARG002
+        # Subprocess env entries must be strings; silently coercing ints/None
+        # would mask config typos and produce confusing CLI errors downstream.
+        with pytest.raises(ValueError, match="environment"):
+            ClaudeAgent.from_dict(
+                "t",
+                {"provider": {"claudeHome": _TEST_HOME, "environment": {"AWS_REGION": 1}}},
+            )
+
+    def test_from_dict_rejects_non_mapping_environment(self, stub_instructions, fake_query):  # noqa: ARG002
+        # A list (or any non-mapping) is a config typo, not a valid env
+        # spec — reject early instead of crashing later inside the SDK.
+        with pytest.raises(ValueError, match="environment"):
+            ClaudeAgent.from_dict(
+                "t",
+                {"provider": {"claudeHome": _TEST_HOME, "environment": ["AWS_REGION=us-east-1"]}},
+            )
+
+    @pytest.mark.anyio
     async def test_max_turns_flows_into_options(self, fake_query):
         agent = ClaudeAgent(name="t", instructions="sys", claude_home=_TEST_HOME, max_turns=5)
         try:
